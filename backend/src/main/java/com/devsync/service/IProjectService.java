@@ -5,7 +5,9 @@ import com.devsync.common.result.PageResult;
 import com.devsync.dto.req.ProjectAddReq;
 import com.devsync.dto.req.ProjectListReq;
 import com.devsync.dto.req.ProjectUpdateReq;
+import com.devsync.dto.req.GitLabBranchReq;
 import com.devsync.dto.rsp.GitCommitRsp;
+import com.devsync.dto.rsp.GitLabBranchRsp;
 import com.devsync.dto.rsp.ProjectRsp;
 import com.devsync.entity.Project;
 
@@ -78,4 +80,12 @@ public interface IProjectService extends IService<Project> {
      * @return 提交记录列表
      */
     List<GitCommitRsp> getCommitsByProjectId(Integer id);
+
+    /**
+     * 获取GitLab分支列表
+     *
+     * @param req 分支查询请求
+     * @return 分支列表
+     */
+    List<GitLabBranchRsp> listGitlabBranches(GitLabBranchReq req);
 }

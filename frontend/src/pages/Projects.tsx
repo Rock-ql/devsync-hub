@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { PageResult } from '@/api'
 import { Plus, Pencil, Trash2, GitBranch, GitCommit } from 'lucide-react'
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
+import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 
 interface Project {
@@ -36,6 +37,10 @@ interface GitCommitRecord {
   deletions: number
 }
 
+interface GitLabBranch {
+  name: string
+}
+
 export default function Projects() {
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -61,6 +66,46 @@ export default function Projects() {
     queryFn: () => api.get(`/project/commits/${selectedProject!.id}`),
     enabled: !!selectedProject && isCommitsModalOpen,
   })
+
+  const canFetchBranches = Boolean(formData.gitlabUrl && formData.gitlabToken)
+
+  const branchQuery = useQuery<GitLabBranch[]>({
+    queryKey: ['gitlab-branches', formData.gitlabUrl, formData.gitlabToken, formData.gitlabProjectId],
+    queryFn: () => {
+      const projectId = formData.gitlabProjectId?.toString().trim()
+      const numericProjectId = projectId ? Number(projectId) : Number.NaN
+      const safeProjectId = Number.isFinite(numericProjectId) && numericProjectId > 0
+        ? numericProjectId
+        : undefined
+      return api.post('/project/branches', {
+        gitlabUrl: formData.gitlabUrl,
+        gitlabToken: formData.gitlabToken,
+        gitlabProjectId: safeProjectId,
+      })
+    },
+    enabled: canFetchBranches,
+  })
+
+  const branchOptions = useMemo(() => {
+    const options: string[] = []
+    const pushUnique = (value?: string) => {
+      if (!value) {
+        return
+      }
+      const normalized = value.trim()
+      if (!normalized || options.includes(normalized)) {
+        return
+      }
+      options.push(normalized)
+    }
+
+    if (canFetchBranches) {
+      branchQuery.data?.forEach((item) => pushUnique(item.name))
+    }
+    pushUnique(formData.gitlabBranch)
+    pushUnique('main')
+    return options
+  }, [branchQuery.data, formData.gitlabBranch, canFetchBranches])
 
   const addMutation = useMutation({
     mutationFn: (data: typeof formData) => api.post('/project/add', data),
@@ -325,10 +370,30 @@ export default function Projects() {
               </div>
               <div className="space-y-2">
                 <Label>默认分支</Label>
-                <Input
+                <Select
                   value={formData.gitlabBranch}
                   onChange={(e) => setFormData({ ...formData, gitlabBranch: e.target.value })}
-                />
+                  disabled={branchQuery.isFetching}
+                >
+                  {branchOptions.map((branch) => (
+                    <option key={branch} value={branch}>
+                      {branch}
+                    </option>
+                  ))}
+                </Select>
+                {branchQuery.isFetching && (
+                  <p className="text-xs text-muted-foreground">正在拉取分支列表...</p>
+                )}
+                {!canFetchBranches && (
+                  <p className="text-xs text-muted-foreground">
+                    填写 GitLab 地址与 Token 后可动态获取分支
+                  </p>
+                )}
+                {branchQuery.isError && (
+                  <p className="text-xs text-red-600">
+                    分支获取失败：{(branchQuery.error as Error).message}
+                  </p>
+                )}
               </div>
             </div>
             <DialogFooter className="pt-2">

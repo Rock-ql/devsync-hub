@@ -5,7 +5,9 @@ import com.devsync.common.result.Result;
 import com.devsync.dto.req.ProjectAddReq;
 import com.devsync.dto.req.ProjectListReq;
 import com.devsync.dto.req.ProjectUpdateReq;
+import com.devsync.dto.req.GitLabBranchReq;
 import com.devsync.dto.rsp.GitCommitRsp;
+import com.devsync.dto.rsp.GitLabBranchRsp;
 import com.devsync.dto.rsp.ProjectRsp;
 import com.devsync.service.IProjectService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -79,5 +81,11 @@ public class ProjectController {
     @Operation(summary = "获取项目提交记录")
     public Result<List<GitCommitRsp>> getCommits(@PathVariable Integer id) {
         return Result.success(projectService.getCommitsByProjectId(id));
+    }
+
+    @PostMapping("/branches")
+    @Operation(summary = "获取GitLab分支列表")
+    public Result<List<GitLabBranchRsp>> listBranches(@Valid @RequestBody GitLabBranchReq req) {
+        return Result.success(projectService.listGitlabBranches(req));
     }
 }

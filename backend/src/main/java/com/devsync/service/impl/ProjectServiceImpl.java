@@ -2,16 +2,19 @@ package com.devsync.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.devsync.client.GitLabClient;
 import com.devsync.common.exception.BusinessException;
 import com.devsync.common.result.PageResult;
+import com.devsync.dto.req.GitLabBranchReq;
 import com.devsync.dto.req.ProjectAddReq;
 import com.devsync.dto.req.ProjectListReq;
 import com.devsync.dto.req.ProjectUpdateReq;
 import com.devsync.dto.rsp.GitCommitRsp;
+import com.devsync.dto.rsp.GitLabBranchRsp;
 import com.devsync.dto.rsp.ProjectRsp;
 import com.devsync.entity.GitCommit;
 import com.devsync.entity.Project;
@@ -250,6 +253,45 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
                     return rsp;
                 })
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<GitLabBranchRsp> listGitlabBranches(GitLabBranchReq req) {
+        log.info("[项目管理] 获取GitLab分支列表，URL: {}, 项目ID: {}", req.getGitlabUrl(), req.getGitlabProjectId());
+
+        try {
+            List<String> branches = gitLabClient.listBranches(
+                    req.getGitlabUrl(),
+                    req.getGitlabToken(),
+                    req.getGitlabProjectId()
+            );
+
+            return branches.stream()
+                    .map(name -> {
+                        GitLabBranchRsp rsp = new GitLabBranchRsp();
+                        rsp.setName(name);
+                        return rsp;
+                    })
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            GitLabBranchReq logReq = new GitLabBranchReq();
+            logReq.setGitlabUrl(req.getGitlabUrl());
+            logReq.setGitlabProjectId(req.getGitlabProjectId());
+            logReq.setGitlabToken(maskToken(req.getGitlabToken()));
+            log.error("[项目管理] 获取GitLab分支失败，参数: {}",
+                    JSON.toJSONString(logReq), e);
+            throw e;
+        }
+    }
+
+    private String maskToken(String token) {
+        if (StrUtil.isBlank(token)) {
+            return token;
+        }
+        if (token.length() <= 8) {
+            return "****";
+        }
+        return token.substring(0, 4) + "****" + token.substring(token.length() - 4);
     }
 
     /**
