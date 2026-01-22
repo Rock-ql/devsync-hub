@@ -1,0 +1,151 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 222 47.4% 11.2%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47.4% 11.2%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47.4% 11.2%;
+    --primary: 221 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 221 100% 50%;
+    --accent-secondary: 224 100% 65.1%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221 100% 50%;
+    --radius: 0.75rem;
+    --font-sans: "Inter", system-ui, sans-serif;
+    --font-display: "Calistoga", Georgia, serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  .dark {
+    --background: 222 47.4% 11.2%;
+    --foreground: 210 40% 98%;
+    --card: 222 47.4% 11.2%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47.4% 11.2%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 221 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 221 100% 50%;
+    --accent-secondary: 224 100% 65.1%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 221 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  h1,
+  h2 {
+    font-family: var(--font-display);
+  }
+  code,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer utilities {
+  .gradient-text {
+    background: linear-gradient(135deg, #0052ff, #4d7cff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .gradient-underline {
+    position: absolute;
+    bottom: -0.25rem;
+    left: 0;
+    height: 0.75rem;
+    width: 100%;
+    border-radius: 0.125rem;
+    background: linear-gradient(
+      to right,
+      rgba(0, 82, 255, 0.15),
+      rgba(77, 124, 255, 0.1)
+    );
+  }
+
+  .dot-pattern {
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.35) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .markdown {
+    @apply text-foreground leading-7;
+  }
+
+  .markdown h1,
+  .markdown h2,
+  .markdown h3 {
+    @apply font-display text-foreground;
+  }
+
+  .markdown h1 {
+    @apply text-3xl mt-8;
+  }
+
+  .markdown h2 {
+    @apply text-2xl mt-6;
+  }
+
+  .markdown h3 {
+    @apply text-xl mt-5;
+  }
+
+  .markdown p {
+    @apply text-muted-foreground mt-3;
+  }
+
+  .markdown ul,
+  .markdown ol {
+    @apply mt-3 pl-5 text-muted-foreground;
+  }
+
+  .markdown li {
+    @apply mt-2;
+  }
+
+  .markdown a {
+    @apply text-[hsl(var(--accent))] underline-offset-4 hover:underline;
+  }
+
+  .markdown code {
+    @apply rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground;
+  }
+
+  .markdown pre {
+    @apply mt-4 overflow-x-auto rounded-xl border border-border bg-muted/60 p-4 text-sm text-foreground;
+  }
+
+  .markdown blockquote {
+    @apply mt-4 border-l-2 border-[hsl(var(--accent))]/40 pl-4 text-muted-foreground;
+  }
+}
