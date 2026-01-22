@@ -25,6 +25,7 @@ import com.devsync.mapper.ProjectMapper;
 import com.devsync.mapper.ReportMapper;
 import com.devsync.mapper.ReportTemplateMapper;
 import com.devsync.service.IReportService;
+import com.devsync.service.ISystemSettingService;
 import com.devsync.util.EncryptUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,9 +35,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -55,7 +59,11 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     private final GitCommitMapper gitCommitMapper;
     private final GitLabClient gitLabClient;
     private final DeepSeekClient deepSeekClient;
+    private final ISystemSettingService systemSettingService;
     private final EncryptUtil encryptUtil;
+
+    private static final String DAILY_TEMPLATE_KEY = "report.template.daily";
+    private static final String WEEKLY_TEMPLATE_KEY = "report.template.weekly";
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -96,24 +104,36 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             allCommits = gitCommitMapper.selectAllByTimeRange(startTime, endTime);
         }
 
-        // 格式化提交记录
-        String commitsText = formatCommits(allCommits);
+        String settingTemplate = getSettingTemplate(req.getType());
+        boolean useSettingTemplate = StrUtil.isNotBlank(settingTemplate);
+        String templateContent = useSettingTemplate ? settingTemplate : template.getContent();
 
-        // 调用AI生成报告
-        String content;
-        try {
-            content = deepSeekClient.generateReport(commitsText, template.getContent(), req.getType());
-        } catch (Exception e) {
-            log.error("[报告生成] AI生成失败，使用模板内容", e);
-            // AI生成失败时，使用简单替换
-            content = template.getContent().replace("{{commits}}", commitsText);
+        TemplateRule rule = parseTemplateRule(templateContent);
+        String commitsText = buildCommitSummary(allCommits, rule);
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        String defaultTitle = reportType.getDesc() + " - " + req.getStartDate().format(formatter);
+        if (!req.getStartDate().equals(req.getEndDate())) {
+            defaultTitle += " ~ " + req.getEndDate().format(formatter);
         }
 
-        // 生成标题
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-        String title = reportType.getDesc() + " - " + req.getStartDate().format(formatter);
-        if (!req.getStartDate().equals(req.getEndDate())) {
-            title += " ~ " + req.getEndDate().format(formatter);
+        String title = useSettingTemplate
+                ? resolveTitle(templateContent, defaultTitle, req)
+                : defaultTitle;
+
+        String content;
+        if (useSettingTemplate) {
+            content = renderTemplate(templateContent, req, commitsText, title);
+        } else {
+            try {
+                content = deepSeekClient.generateReport(commitsText, templateContent, req.getType());
+            } catch (Exception e) {
+                log.error("[报告生成] AI生成失败，使用模板内容", e);
+                content = renderTemplate(templateContent, req, commitsText, title);
+            }
+            if (StrUtil.isBlank(content)) {
+                content = renderTemplate(templateContent, req, commitsText, title);
+            }
         }
 
         // 保存报告
@@ -137,6 +157,183 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         log.info("[报告生成] 报告生成成功，ID: {}", report.getId());
 
         return convertToRsp(report);
+    }
+
+    private String getSettingTemplate(String type) {
+        if ("daily".equals(type)) {
+            return systemSettingService.getSetting(DAILY_TEMPLATE_KEY);
+        }
+        if ("weekly".equals(type)) {
+            return systemSettingService.getSetting(WEEKLY_TEMPLATE_KEY);
+        }
+        return null;
+    }
+
+    private TemplateRule parseTemplateRule(String template) {
+        String content = StrUtil.blankToDefault(template, "");
+        boolean groupByProject = containsAny(content, "按项目", "项目归类", "项目分类", "项目分组", "项目维度");
+        boolean numbered = containsAny(content, "序号", "编号", "编号列表", "序号列表");
+        boolean brief = containsAny(content, "简要", "概要", "概述", "摘要", "简述");
+        boolean detailed = containsAny(content, "详细", "明细", "详情");
+        if (brief) {
+            detailed = false;
+        }
+        if (!brief && !detailed) {
+            detailed = true;
+        }
+        return new TemplateRule(groupByProject, numbered, detailed);
+    }
+
+    private String buildCommitSummary(List<GitCommit> commits, TemplateRule rule) {
+        if (commits.isEmpty()) {
+            return "暂无提交记录";
+        }
+
+        Map<Integer, String> projectNameMap = loadProjectNameMap(commits);
+        if (rule.groupByProject) {
+            return renderGrouped(commits, projectNameMap, rule);
+        }
+        return renderFlat(commits, rule);
+    }
+
+    private Map<Integer, String> loadProjectNameMap(List<GitCommit> commits) {
+        Set<Integer> projectIds = commits.stream()
+                .map(GitCommit::getProjectId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (projectIds.isEmpty()) {
+            return new HashMap<>();
+        }
+
+        LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(Project::getId, projectIds);
+        List<Project> projects = projectMapper.selectList(wrapper);
+
+        Map<Integer, String> result = new HashMap<>();
+        for (Project project : projects) {
+            result.put(project.getId(), project.getName());
+        }
+        return result;
+    }
+
+    private String renderGrouped(List<GitCommit> commits, Map<Integer, String> projectNameMap, TemplateRule rule) {
+        Map<Integer, List<GitCommit>> grouped = new LinkedHashMap<>();
+        for (GitCommit commit : commits) {
+            Integer projectId = commit.getProjectId() != null ? commit.getProjectId() : 0;
+            grouped.computeIfAbsent(projectId, key -> new java.util.ArrayList<>()).add(commit);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<Integer, List<GitCommit>> entry : grouped.entrySet()) {
+            Integer projectId = entry.getKey();
+            String projectName = projectNameMap.getOrDefault(projectId, projectId == 0 ? "未关联项目" : "项目 " + projectId);
+            sb.append("### 项目：").append(projectName).append("\n");
+            appendCommitLines(sb, entry.getValue(), rule);
+            sb.append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    private String renderFlat(List<GitCommit> commits, TemplateRule rule) {
+        StringBuilder sb = new StringBuilder();
+        appendCommitLines(sb, commits, rule);
+        return sb.toString().trim();
+    }
+
+    private void appendCommitLines(StringBuilder sb, List<GitCommit> commits, TemplateRule rule) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        int index = 1;
+        for (GitCommit commit : commits) {
+            String message = StrUtil.blankToDefault(commit.getMessage(), "无提交信息");
+            String line = message;
+            if (rule.detailed) {
+                String author = StrUtil.blankToDefault(commit.getAuthorName(), "");
+                String authorPart = StrUtil.isNotBlank(author) ? "（" + author + "）" : "";
+                if (commit.getCommittedAt() != null) {
+                    line = "[" + commit.getCommittedAt().format(formatter) + "] " + line + authorPart;
+                } else {
+                    line = line + authorPart;
+                }
+            }
+
+            if (rule.numbered) {
+                sb.append(index).append(". ").append(line).append("\n");
+            } else {
+                sb.append("- ").append(line).append("\n");
+            }
+            index++;
+        }
+    }
+
+    private String renderTemplate(String template, ReportGenerateReq req, String commitsText, String title) {
+        String content = StrUtil.blankToDefault(template, "");
+        String date = req.getStartDate() != null ? req.getStartDate().toString() : "";
+        String startDate = req.getStartDate() != null ? req.getStartDate().toString() : "";
+        String endDate = req.getEndDate() != null ? req.getEndDate().toString() : "";
+
+        content = content.replace("{{commits}}", commitsText);
+        content = content.replace("{commits}", commitsText);
+        content = content.replace("{{date}}", date);
+        content = content.replace("{date}", date);
+        content = content.replace("{{startDate}}", startDate);
+        content = content.replace("{startDate}", startDate);
+        content = content.replace("{{endDate}}", endDate);
+        content = content.replace("{endDate}", endDate);
+        content = content.replace("{{title}}", title);
+        content = content.replace("{title}", title);
+        return content;
+    }
+
+    private String resolveTitle(String template, String defaultTitle, ReportGenerateReq req) {
+        String rendered = renderTemplate(template, req, "", defaultTitle);
+        String titleLine = findTitleLine(rendered);
+        if (StrUtil.isNotBlank(titleLine)) {
+            return titleLine;
+        }
+        String firstLine = firstNonEmptyLine(rendered);
+        if (firstLine.startsWith("# ")) {
+            return firstLine.substring(2).trim();
+        }
+        return defaultTitle;
+    }
+
+    private String firstNonEmptyLine(String content) {
+        if (StrUtil.isBlank(content)) {
+            return "";
+        }
+        String[] lines = content.split("\n");
+        for (String line : lines) {
+            if (StrUtil.isNotBlank(line)) {
+                return line.trim();
+            }
+        }
+        return "";
+    }
+
+    private String findTitleLine(String content) {
+        if (StrUtil.isBlank(content)) {
+            return "";
+        }
+        String[] lines = content.split("\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (StrUtil.isBlank(trimmed)) {
+                continue;
+            }
+            if (trimmed.startsWith("标题:") || trimmed.startsWith("标题：")) {
+                return trimmed.substring(3).trim();
+            }
+        }
+        return "";
+    }
+
+    private boolean containsAny(String content, String... keywords) {
+        for (String keyword : keywords) {
+            if (content.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -243,29 +440,6 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     }
 
     /**
-     * 格式化提交记录
-     */
-    private String formatCommits(List<GitCommit> commits) {
-        if (commits.isEmpty()) {
-            return "暂无提交记录";
-        }
-
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-        StringBuilder sb = new StringBuilder();
-
-        for (GitCommit commit : commits) {
-            sb.append("- [").append(commit.getCommittedAt().format(formatter)).append("] ");
-            sb.append(commit.getMessage());
-            if (StrUtil.isNotBlank(commit.getAuthorName())) {
-                sb.append(" (").append(commit.getAuthorName()).append(")");
-            }
-            sb.append("\n");
-        }
-
-        return sb.toString();
-    }
-
-    /**
      * 转换为响应对象
      */
     private ReportRsp convertToRsp(Report report) {
@@ -291,5 +465,17 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         }
 
         return rsp;
+    }
+
+    private static class TemplateRule {
+        private final boolean groupByProject;
+        private final boolean numbered;
+        private final boolean detailed;
+
+        private TemplateRule(boolean groupByProject, boolean numbered, boolean detailed) {
+            this.groupByProject = groupByProject;
+            this.numbered = numbered;
+            this.detailed = detailed;
+        }
     }
 }
