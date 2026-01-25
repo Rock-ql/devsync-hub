@@ -3,18 +3,17 @@ package com.devsync.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.devsync.common.enums.IterationStatusEnum;
-import com.devsync.common.enums.SqlStatusEnum;
 import com.devsync.dto.rsp.DashboardRsp;
 import com.devsync.dto.rsp.IterationRsp;
 import com.devsync.dto.rsp.ProjectRsp;
 import com.devsync.entity.GitCommit;
 import com.devsync.entity.Iteration;
-import com.devsync.entity.PendingSql;
 import com.devsync.entity.Project;
 import com.devsync.mapper.GitCommitMapper;
 import com.devsync.mapper.IterationMapper;
 import com.devsync.mapper.PendingSqlMapper;
 import com.devsync.mapper.ProjectMapper;
+import com.devsync.mapper.ProjectPendingCount;
 import com.devsync.service.IDashboardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -72,10 +71,8 @@ public class DashboardServiceImpl implements IDashboardService {
         rsp.setActiveIterationCount(activeIterationCount.intValue());
 
         // 待执行SQL统计
-        LambdaQueryWrapper<PendingSql> sqlWrapper = new LambdaQueryWrapper<>();
-        sqlWrapper.eq(PendingSql::getStatus, SqlStatusEnum.PENDING.getCode());
-        Long pendingSqlCount = pendingSqlMapper.selectCount(sqlWrapper);
-        rsp.setPendingSqlCount(pendingSqlCount.intValue());
+        Integer pendingSqlCount = pendingSqlMapper.countPendingAll();
+        rsp.setPendingSqlCount(pendingSqlCount == null ? 0 : pendingSqlCount);
 
         // 提交统计
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
@@ -118,30 +115,25 @@ public class DashboardServiceImpl implements IDashboardService {
      * 获取按项目分组的待执行SQL
      */
     private List<DashboardRsp.ProjectPendingSqlRsp> getPendingSqlByProject() {
-        LambdaQueryWrapper<PendingSql> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(PendingSql::getStatus, SqlStatusEnum.PENDING.getCode());
-        List<PendingSql> pendingSqlList = pendingSqlMapper.selectList(wrapper);
-
-        // 按项目分组
-        Map<Integer, Long> countByProject = pendingSqlList.stream()
-                .collect(Collectors.groupingBy(PendingSql::getProjectId, Collectors.counting()));
-
-        // 获取项目名称
-        Map<Integer, String> projectNames = new HashMap<>();
-        if (!countByProject.isEmpty()) {
-            List<Project> projects = projectMapper.selectBatchIds(countByProject.keySet());
-            for (Project project : projects) {
-                projectNames.put(project.getId(), project.getName());
-            }
+        List<ProjectPendingCount> pendingCounts = pendingSqlMapper.countPendingGroupByProject();
+        if (pendingCounts.isEmpty()) {
+            return List.of();
         }
 
-        // 构建结果
+        Map<Integer, String> projectNames = new HashMap<>();
+        List<Project> projects = projectMapper.selectBatchIds(
+                pendingCounts.stream().map(ProjectPendingCount::getProjectId).toList()
+        );
+        for (Project project : projects) {
+            projectNames.put(project.getId(), project.getName());
+        }
+
         List<DashboardRsp.ProjectPendingSqlRsp> result = new ArrayList<>();
-        for (Map.Entry<Integer, Long> entry : countByProject.entrySet()) {
+        for (ProjectPendingCount count : pendingCounts) {
             DashboardRsp.ProjectPendingSqlRsp item = new DashboardRsp.ProjectPendingSqlRsp();
-            item.setProjectId(entry.getKey());
-            item.setProjectName(projectNames.getOrDefault(entry.getKey(), "未知项目"));
-            item.setCount(entry.getValue().intValue());
+            item.setProjectId(count.getProjectId());
+            item.setProjectName(projectNames.getOrDefault(count.getProjectId(), "未知项目"));
+            item.setCount(count.getCount().intValue());
             result.add(item);
         }
 

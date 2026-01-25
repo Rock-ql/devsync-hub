@@ -68,6 +68,13 @@ public interface IPendingSqlService extends IService<PendingSql> {
     void batchExecuteSql(PendingSqlBatchExecuteReq req);
 
     /**
+     * 撤销执行记录
+     *
+     * @param req 撤销请求
+     */
+    void revokeExecution(SqlExecutionRevokeReq req);
+
+    /**
      * 获取项目的待执行SQL列表
      *
      * @param projectId 项目ID

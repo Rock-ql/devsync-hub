@@ -5,6 +5,8 @@ import com.devsync.entity.PendingSql;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.List;
+
 /**
  * 待执行SQL Mapper
  *
@@ -19,7 +21,18 @@ public interface PendingSqlMapper extends BaseMapper<PendingSql> {
      * @param projectId 项目ID
      * @return 待执行SQL数量
      */
-    @Select("SELECT COUNT(*) FROM pending_sql WHERE project_id = #{projectId} AND status = 'pending' AND deleted_at IS NULL")
+    @Select({
+            "SELECT COUNT(*) FROM pending_sql ps",
+            "LEFT JOIN (",
+            "  SELECT sql_id, COUNT(*) AS executed_count",
+            "  FROM sql_execution_log",
+            "  WHERE deleted_at IS NULL",
+            "  GROUP BY sql_id",
+            ") log ON log.sql_id = ps.id",
+            "WHERE ps.project_id = #{projectId}",
+            "  AND ps.deleted_at IS NULL",
+            "  AND COALESCE(log.executed_count, 0) = 0"
+    })
     Integer countPendingByProjectId(Integer projectId);
 
     /**
@@ -28,8 +41,53 @@ public interface PendingSqlMapper extends BaseMapper<PendingSql> {
      * @param iterationId 迭代ID
      * @return 待执行SQL数量
      */
-    @Select("SELECT COUNT(*) FROM pending_sql WHERE iteration_id = #{iterationId} AND status = 'pending' AND deleted_at IS NULL")
+    @Select({
+            "SELECT COUNT(*) FROM pending_sql ps",
+            "LEFT JOIN (",
+            "  SELECT sql_id, COUNT(*) AS executed_count",
+            "  FROM sql_execution_log",
+            "  WHERE deleted_at IS NULL",
+            "  GROUP BY sql_id",
+            ") log ON log.sql_id = ps.id",
+            "WHERE ps.iteration_id = #{iterationId}",
+            "  AND ps.deleted_at IS NULL",
+            "  AND COALESCE(log.executed_count, 0) = 0"
+    })
     Integer countPendingByIterationId(Integer iterationId);
+
+    /**
+     * 统计所有待执行SQL数量
+     */
+    @Select({
+            "SELECT COUNT(*) FROM pending_sql ps",
+            "LEFT JOIN (",
+            "  SELECT sql_id, COUNT(*) AS executed_count",
+            "  FROM sql_execution_log",
+            "  WHERE deleted_at IS NULL",
+            "  GROUP BY sql_id",
+            ") log ON log.sql_id = ps.id",
+            "WHERE ps.deleted_at IS NULL",
+            "  AND COALESCE(log.executed_count, 0) = 0"
+    })
+    Integer countPendingAll();
+
+    /**
+     * 按项目统计待执行SQL数量
+     */
+    @Select({
+            "SELECT ps.project_id AS projectId, COUNT(*) AS count",
+            "FROM pending_sql ps",
+            "LEFT JOIN (",
+            "  SELECT sql_id, COUNT(*) AS executed_count",
+            "  FROM sql_execution_log",
+            "  WHERE deleted_at IS NULL",
+            "  GROUP BY sql_id",
+            ") log ON log.sql_id = ps.id",
+            "WHERE ps.deleted_at IS NULL",
+            "  AND COALESCE(log.executed_count, 0) = 0",
+            "GROUP BY ps.project_id"
+    })
+    List<ProjectPendingCount> countPendingGroupByProject();
 
     /**
      * 获取项目的下一个执行顺序号

@@ -21,6 +21,6 @@ public class PendingSqlBatchExecuteReq {
     private List<Integer> ids;
 
     @NotBlank(message = "执行环境不能为空")
-    @Schema(description = "执行环境（如：local/dev/test/prod）")
+    @Schema(description = "执行环境（如：local/dev/test/smoke/prod）")
     private String executedEnv;
 }

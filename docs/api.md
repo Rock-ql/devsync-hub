@@ -328,7 +328,7 @@ POST /sql/list
 | pageSize | int | 否 | 每页数量 |
 | projectId | int | 否 | 筛选项目 |
 | iterationId | int | 否 | 筛选迭代 |
-| status | string | 否 | pending/executed |
+| status | string | 否 | pending/partial/completed |
 
 **响应示例**
 
@@ -347,10 +347,54 @@ POST /sql/list
         "title": "添加用户表索引",
         "content": "CREATE INDEX idx_user_phone ON user(phone);",
         "executionOrder": 1,
-        "status": "pending",
-        "statusDesc": "待执行",
-        "executedAt": null,
-        "executedEnv": null,
+        "status": "partial",
+        "statusDesc": "部分执行",
+        "executedAt": "2026-01-20T10:00:00",
+        "executedEnv": "dev",
+        "executedCount": 2,
+        "envTotal": 5,
+        "envExecutionList": [
+          {
+            "envCode": "local",
+            "envName": "local",
+            "executed": true,
+            "executedAt": "2026-01-19T10:00:00",
+            "executor": "",
+            "remark": ""
+          },
+          {
+            "envCode": "dev",
+            "envName": "dev",
+            "executed": true,
+            "executedAt": "2026-01-20T10:00:00",
+            "executor": "",
+            "remark": ""
+          },
+          {
+            "envCode": "test",
+            "envName": "test",
+            "executed": false,
+            "executedAt": null,
+            "executor": "",
+            "remark": ""
+          },
+          {
+            "envCode": "smoke",
+            "envName": "smoke",
+            "executed": false,
+            "executedAt": null,
+            "executor": "",
+            "remark": ""
+          },
+          {
+            "envCode": "prod",
+            "envName": "prod",
+            "executed": false,
+            "executedAt": null,
+            "executor": "",
+            "remark": ""
+          }
+        ],
         "createdAt": "2026-01-15T10:00:00"
       }
     ],
@@ -405,20 +449,26 @@ POST /sql/delete/{id}
 ### 标记已执行
 
 ```http
-POST /sql/execute/{id}
+POST /sql/execute
 ```
 
 **请求参数**
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| env | string | 是 | 执行环境，如 prod/test |
+| id | int | 是 | SQL ID |
+| executedEnv | string | 是 | 执行环境，如 local/dev/test/smoke/prod |
+| remark | string | 否 | 执行备注 |
+| executor | string | 否 | 执行人 |
 
 **请求示例**
 
 ```json
 {
-  "env": "prod"
+  "id": 1,
+  "executedEnv": "prod",
+  "remark": "上线变更",
+  "executor": "admin"
 }
 ```
 
@@ -433,16 +483,71 @@ POST /sql/batch-execute
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | ids | int[] | 是 | SQL ID 列表 |
-| env | string | 是 | 执行环境 |
+| executedEnv | string | 是 | 执行环境，如 local/dev/test/smoke/prod |
 
 **请求示例**
 
 ```json
 {
   "ids": [1, 2, 3],
-  "env": "prod"
+  "executedEnv": "prod"
 }
 ```
+
+### 撤销执行记录
+
+```http
+POST /sql/revoke-execution
+```
+
+**请求参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| sqlId | int | 是 | SQL ID |
+| env | string | 是 | 环境代码 |
+
+**请求示例**
+
+```json
+{
+  "sqlId": 1,
+  "env": "smoke"
+}
+```
+
+### 获取项目环境列表
+
+```http
+POST /sql/env/list
+```
+
+**说明**
+
+环境固定为 local/dev/test/smoke/prod，不支持自定义。
+
+**请求参数**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| projectId | int | 是 | 项目ID |
+
+**响应示例**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    { "id": 1, "projectId": 1, "envCode": "local", "envName": "local", "sortOrder": 1 },
+    { "id": 2, "projectId": 1, "envCode": "dev", "envName": "dev", "sortOrder": 2 },
+    { "id": 3, "projectId": 1, "envCode": "test", "envName": "test", "sortOrder": 3 },
+    { "id": 4, "projectId": 1, "envCode": "smoke", "envName": "smoke", "sortOrder": 4 },
+    { "id": 5, "projectId": 1, "envCode": "prod", "envName": "prod", "sortOrder": 5 }
+  ]
+}
+```
+
 
 ---
 

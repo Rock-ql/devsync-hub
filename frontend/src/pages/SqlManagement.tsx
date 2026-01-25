@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { PageResult } from '@/api'
-import { Plus, Check, Trash2, Pencil } from 'lucide-react'
+import { Eye, Plus, Trash2, Pencil } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,8 +13,30 @@ import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
+import { EnvExecutionButtons } from '@/components/sql/EnvExecutionButtons'
+import { ExecuteConfirmDialog } from '@/components/sql/ExecuteConfirmDialog'
+
+interface EnvExecution {
+  envCode: string
+  envName: string
+  executed: boolean
+  executedAt?: string
+  executor?: string
+  remark?: string
+}
+
+const FIXED_ENV_OPTIONS = [
+  { envCode: 'local', envName: 'local' },
+  { envCode: 'dev', envName: 'dev' },
+  { envCode: 'test', envName: 'test' },
+  { envCode: 'smoke', envName: 'smoke' },
+  { envCode: 'prod', envName: 'prod' },
+]
 
 interface PendingSql {
+  envExecutionList: EnvExecution[]
+  executedCount: number
+  envTotal: number
   id: number
   projectId: number
   projectName: string
@@ -43,6 +65,14 @@ export default function SqlManagement() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({ title: '', content: '', remark: '' })
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [executeDialogOpen, setExecuteDialogOpen] = useState(false)
+  const [executeDialogMode, setExecuteDialogMode] = useState<'execute' | 'detail'>('execute')
+  const [selectedEnv, setSelectedEnv] = useState<EnvExecution | null>(null)
+  const [selectedSql, setSelectedSql] = useState<PendingSql | null>(null)
+  const [executeEnvCode, setExecuteEnvCode] = useState('')
+  const [executeRemark, setExecuteRemark] = useState('')
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
+  const [previewSql, setPreviewSql] = useState<PendingSql | null>(null)
   const [formData, setFormData] = useState({
     projectId: '',
     iterationId: '',
@@ -91,10 +121,26 @@ export default function SqlManagement() {
   })
 
   const executeMutation = useMutation({
-    mutationFn: ({ id, env }: { id: number; env: string }) =>
-      api.post('/sql/execute', { id, executedEnv: env }),
+    mutationFn: ({ id, env, remark }: { id: number; env: string; remark: string }) =>
+      api.post('/sql/execute', { id, executedEnv: env, remark }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
+      setExecuteDialogOpen(false)
+      setExecuteRemark('')
+      setSelectedEnv(null)
+      setSelectedSql(null)
+    },
+  })
+
+  const revokeMutation = useMutation({
+    mutationFn: ({ sqlId, env }: { sqlId: number; env: string }) =>
+      api.post('/sql/revoke-execution', { sqlId, env }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
+      setExecuteDialogOpen(false)
+      setExecuteRemark('')
+      setSelectedEnv(null)
+      setSelectedSql(null)
     },
   })
 
@@ -135,6 +181,13 @@ export default function SqlManagement() {
 
   const handleSaveEdit = () => {
     if (!editingId) return
+    const editingSql = sqlList?.list.find((item) => item.id === editingId)
+    const editingEnvItems = buildEnvItems(editingSql)
+    if (editingEnvItems.some((item) => item.executed)) {
+      if (!confirm('该SQL已在部分环境执行，修改不影响已有执行记录，是否继续？')) {
+        return
+      }
+    }
     updateMutation.mutate({
       id: editingId,
       title: editForm.title,
@@ -143,11 +196,35 @@ export default function SqlManagement() {
     })
   }
 
-  const handleExecute = (id: number) => {
-    const env = prompt('请输入执行环境（如：local/dev/test/prod）', 'prod')
-    if (env) {
-      executeMutation.mutate({ id, env })
-    }
+  const buildEnvItems = (sql?: PendingSql | null): EnvExecution[] => {
+    const map = new Map((sql?.envExecutionList || []).map((item) => [item.envCode, item]))
+    return FIXED_ENV_OPTIONS.map((option) => {
+      const existing = map.get(option.envCode)
+      return {
+        envCode: option.envCode,
+        envName: option.envName,
+        executed: existing?.executed ?? false,
+        executedAt: existing?.executedAt,
+        executor: existing?.executor,
+        remark: existing?.remark,
+      }
+    })
+  }
+
+  const handleOpenExecute = (sql: PendingSql, envCode?: string) => {
+    const envOptions = buildEnvItems(sql)
+    const defaultEnvCode = envCode
+      || envOptions.find((item) => !item.executed)?.envCode
+      || envOptions[0]?.envCode
+      || ''
+    const env = envOptions.find((item) => item.envCode === defaultEnvCode) || null
+
+    setSelectedSql(sql)
+    setSelectedEnv(env)
+    setExecuteEnvCode(defaultEnvCode)
+    setExecuteDialogMode('execute')
+    setExecuteRemark('')
+    setExecuteDialogOpen(true)
   }
 
   const handleModalChange = (open: boolean) => {
@@ -155,6 +232,11 @@ export default function SqlManagement() {
     if (!open) {
       resetForm()
     }
+  }
+
+  const handlePreviewSql = (sql: PendingSql) => {
+    setPreviewSql(sql)
+    setPreviewDialogOpen(true)
   }
 
   if (isLoading) {
@@ -209,7 +291,8 @@ export default function SqlManagement() {
             >
               <option value="">全部状态</option>
               <option value="pending">待执行</option>
-              <option value="executed">已执行</option>
+              <option value="partial">部分执行</option>
+              <option value="completed">全部完成</option>
             </Select>
           </div>
         </CardContent>
@@ -218,6 +301,8 @@ export default function SqlManagement() {
       <div className="space-y-6">
         {sqlList?.list?.length ? (
           sqlList.list.map((sql) => {
+            const envItems = buildEnvItems(sql)
+            const executedCount = envItems.filter((item) => item.executed).length
             const isEditing = editingId === sql.id
             return (
               <Card
@@ -242,7 +327,7 @@ export default function SqlManagement() {
                       <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                         <Badge
                           variant="soft"
-                          tone={sql.status === 'pending' ? 'warning' : 'success'}
+                          tone={sql.status === 'completed' ? 'success' : 'warning'}
                         >
                           {sql.statusDesc}
                         </Badge>
@@ -258,8 +343,8 @@ export default function SqlManagement() {
                           setEditForm({ ...editForm, content: e.target.value })
                           setHasUnsavedChanges(true)
                         }}
-                        rows={8}
-                        className="font-mono text-sm"
+                        rows={12}
+                        className="max-h-[520px] min-h-[320px] resize-y overflow-y-auto font-mono text-sm"
                         required
                       />
                       <Textarea
@@ -289,7 +374,7 @@ export default function SqlManagement() {
                           <CardTitle>{sql.title}</CardTitle>
                           <Badge
                             variant="soft"
-                            tone={sql.status === 'pending' ? 'warning' : 'success'}
+                            tone={sql.status === 'completed' ? 'success' : 'warning'}
                           >
                             {sql.statusDesc}
                           </Badge>
@@ -303,27 +388,27 @@ export default function SqlManagement() {
                           variant="ghost"
                           size="sm"
                           className="h-9 w-9 p-0"
+                          onClick={() => handlePreviewSql(sql)}
+                          aria-label="查看 SQL 详情"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 w-9 p-0"
                           onClick={() => handleStartEdit(sql)}
-                          disabled={sql.status === 'executed'}
                           aria-label="编辑 SQL"
                         >
-                          <Pencil
-                            className={cn(
-                              'h-4 w-4',
-                              sql.status === 'executed' && 'text-muted-foreground'
-                            )}
-                          />
+                          <Pencil className="h-4 w-4" />
                         </Button>
-                        {sql.status === 'pending' && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleExecute(sql.id)}
-                          >
-                            <Check className="h-4 w-4" />
-                            标记已执行
-                          </Button>
-                        )}
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleOpenExecute(sql)}
+                        >
+                          执行
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -340,13 +425,32 @@ export default function SqlManagement() {
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <pre className="rounded-xl border border-border/60 bg-muted/60 p-4 text-sm text-foreground overflow-x-auto">
+                      <pre className="max-h-56 overflow-y-auto rounded-xl border border-border/60 bg-muted/60 p-4 text-sm text-foreground overflow-x-auto">
                         {sql.content}
                       </pre>
 
-                      {sql.status === 'executed' && (
+                      <EnvExecutionButtons
+                        items={envItems}
+                        executedCount={executedCount}
+                        envTotal={envItems.length}
+                        showAddEnv={false}
+                        onExecute={(envCode) => {
+                          handleOpenExecute(sql, envCode)
+                        }}
+                        onDetail={(envCode) => {
+                          const env = sql.envExecutionList?.find((item) => item.envCode === envCode)
+                          if (!env) return
+                          setSelectedSql(sql)
+                          setSelectedEnv(env)
+                          setExecuteDialogMode('detail')
+                          setExecuteRemark(env.remark || '')
+                          setExecuteDialogOpen(true)
+                        }}
+                      />
+
+                      {sql.executedAt && (
                         <p className="text-xs text-muted-foreground">
-                          执行时间: {sql.executedAt} | 环境: {sql.executedEnv}
+                          最近执行时间: {sql.executedAt} | 环境: {sql.executedEnv}
                         </p>
                       )}
 
@@ -367,6 +471,65 @@ export default function SqlManagement() {
           </Card>
         )}
       </div>
+
+      <ExecuteConfirmDialog
+        open={executeDialogOpen}
+        mode={executeDialogMode}
+        envName={selectedEnv?.envName || ''}
+        sqlTitle={selectedSql?.title || ''}
+        envOptions={buildEnvItems(selectedSql)}
+        selectedEnvCode={executeEnvCode}
+        executedAt={selectedEnv?.executedAt}
+        executor={selectedEnv?.executor}
+        remark={executeRemark}
+        onRemarkChange={setExecuteRemark}
+        onClose={() => {
+          setExecuteDialogOpen(false)
+          setSelectedEnv(null)
+          setSelectedSql(null)
+          setExecuteRemark('')
+          setExecuteEnvCode('')
+        }}
+        onConfirm={() => {
+          if (!selectedSql) return
+          if (!executeEnvCode) {
+            alert('请选择执行环境')
+            return
+          }
+          executeMutation.mutate({ id: selectedSql.id, env: executeEnvCode, remark: executeRemark })
+        }}
+        onEnvChange={(value) => {
+          setExecuteEnvCode(value)
+          const env = buildEnvItems(selectedSql).find((item) => item.envCode === value) || null
+          setSelectedEnv(env)
+        }}
+        onRevoke={() => {
+          if (!selectedEnv || !selectedSql) return
+          revokeMutation.mutate({ sqlId: selectedSql.id, env: selectedEnv.envCode })
+        }}
+      />
+
+      <Dialog open={previewDialogOpen} onOpenChange={(open) => {
+        setPreviewDialogOpen(open)
+        if (!open) {
+          setPreviewSql(null)
+        }
+      }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{previewSql?.title || 'SQL 详情'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>
+              {previewSql?.projectName || ''}{' '}
+              {previewSql?.iterationName ? `/ ${previewSql.iterationName}` : ''}
+            </p>
+          </div>
+          <pre className="max-h-[70vh] overflow-auto rounded-xl border border-border/60 bg-muted/60 p-4 text-sm text-foreground">
+            {previewSql?.content || ''}
+          </pre>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isModalOpen} onOpenChange={handleModalChange}>
         <DialogContent className="max-w-2xl">

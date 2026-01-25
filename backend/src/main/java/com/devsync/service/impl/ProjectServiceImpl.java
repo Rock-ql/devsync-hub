@@ -23,6 +23,7 @@ import com.devsync.mapper.IterationMapper;
 import com.devsync.mapper.PendingSqlMapper;
 import com.devsync.mapper.ProjectMapper;
 import com.devsync.service.IProjectService;
+import com.devsync.service.ISqlEnvConfigService;
 import com.devsync.util.EncryptUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     private final GitCommitMapper gitCommitMapper;
     private final GitLabClient gitLabClient;
     private final EncryptUtil encryptUtil;
+    private final ISqlEnvConfigService sqlEnvConfigService;
 
     @Override
     public PageResult<ProjectRsp> listProjects(ProjectListReq req) {
@@ -122,6 +124,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
 
         projectMapper.insert(project);
         log.info("[项目管理] 新增项目成功，ID: {}", project.getId());
+
+        Integer userId = project.getUserId() == null ? 1 : project.getUserId();
+        sqlEnvConfigService.initDefaultEnvs(project.getId(), userId);
 
         return project.getId();
     }

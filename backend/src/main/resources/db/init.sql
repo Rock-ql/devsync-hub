@@ -70,7 +70,59 @@ CREATE TABLE IF NOT EXISTS pending_sql (
 COMMENT ON TABLE pending_sql IS '待执行SQL表';
 COMMENT ON COLUMN pending_sql.status IS '状态: pending/executed';
 
--- 4. 日报周报表
+-- 4. SQL环境配置表
+CREATE TABLE IF NOT EXISTS sql_env_config (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    project_id INTEGER NOT NULL,
+    env_code VARCHAR(50) NOT NULL,
+    env_name VARCHAR(100) NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    state INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP DEFAULT NULL
+);
+
+COMMENT ON TABLE sql_env_config IS '项目环境配置表';
+COMMENT ON COLUMN sql_env_config.project_id IS '项目ID';
+COMMENT ON COLUMN sql_env_config.env_code IS '环境代码';
+COMMENT ON COLUMN sql_env_config.env_name IS '环境名称';
+COMMENT ON COLUMN sql_env_config.sort_order IS '排序';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_env_project_code
+ON sql_env_config(project_id, env_code)
+WHERE deleted_at IS NULL;
+
+-- 5. SQL执行记录表
+CREATE TABLE IF NOT EXISTS sql_execution_log (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    sql_id INTEGER NOT NULL,
+    env VARCHAR(50) NOT NULL,
+    executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    executor VARCHAR(100) DEFAULT '',
+    remark TEXT DEFAULT '',
+    state INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP DEFAULT NULL
+);
+
+COMMENT ON TABLE sql_execution_log IS 'SQL执行记录表';
+COMMENT ON COLUMN sql_execution_log.sql_id IS 'SQL ID';
+COMMENT ON COLUMN sql_execution_log.env IS '执行环境代码';
+COMMENT ON COLUMN sql_execution_log.executor IS '执行人';
+COMMENT ON COLUMN sql_execution_log.remark IS '执行备注';
+
+CREATE INDEX IF NOT EXISTS idx_sql_execution_log_sql_id
+ON sql_execution_log(sql_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sql_execution_env
+ON sql_execution_log(sql_id, env)
+WHERE deleted_at IS NULL;
+
+-- 6. 日报周报表
 CREATE TABLE IF NOT EXISTS report (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL DEFAULT 1,
@@ -89,7 +141,7 @@ CREATE TABLE IF NOT EXISTS report (
 COMMENT ON TABLE report IS '日报周报表';
 COMMENT ON COLUMN report.type IS '类型: daily/weekly';
 
--- 5. 报告模板表
+-- 7. 报告模板表
 CREATE TABLE IF NOT EXISTS report_template (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL DEFAULT 1,
@@ -105,7 +157,7 @@ CREATE TABLE IF NOT EXISTS report_template (
 
 COMMENT ON TABLE report_template IS '报告模板表';
 
--- 6. API Key表
+-- 8. API Key表
 CREATE TABLE IF NOT EXISTS api_key (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL DEFAULT 1,
@@ -121,7 +173,7 @@ CREATE TABLE IF NOT EXISTS api_key (
 
 COMMENT ON TABLE api_key IS 'API Key表';
 
--- 7. 系统设置表
+-- 9. 系统设置表
 CREATE TABLE IF NOT EXISTS system_setting (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL DEFAULT 1,
@@ -137,7 +189,7 @@ CREATE TABLE IF NOT EXISTS system_setting (
 
 COMMENT ON TABLE system_setting IS '系统设置表';
 
--- 8. Git提交记录缓存表
+-- 10. Git提交记录缓存表
 CREATE TABLE IF NOT EXISTS git_commit (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL DEFAULT 1,

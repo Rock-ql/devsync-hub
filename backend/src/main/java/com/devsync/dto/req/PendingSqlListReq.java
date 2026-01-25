@@ -23,6 +23,6 @@ public class PendingSqlListReq extends PageReq {
     @Schema(description = "标题（模糊搜索）")
     private String title;
 
-    @Schema(description = "状态: pending/executed")
+    @Schema(description = "状态: pending/partial/completed")
     private String status;
 }

@@ -19,6 +19,12 @@ public class PendingSqlExecuteReq {
     private Integer id;
 
     @NotBlank(message = "执行环境不能为空")
-    @Schema(description = "执行环境（如：local/dev/test/prod）")
+    @Schema(description = "执行环境（如：local/dev/test/smoke/prod）")
     private String executedEnv;
+
+    @Schema(description = "执行备注")
+    private String remark;
+
+    @Schema(description = "执行人")
+    private String executor;
 }

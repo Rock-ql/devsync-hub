@@ -5,25 +5,34 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.devsync.common.enums.SqlExecutionStatusEnum;
 import com.devsync.common.enums.SqlStatusEnum;
 import com.devsync.common.exception.BusinessException;
 import com.devsync.common.result.PageResult;
+import com.devsync.common.util.SqlExecutionStatusHelper;
 import com.devsync.dto.req.*;
+import com.devsync.dto.rsp.PendingSqlEnvExecutionRsp;
 import com.devsync.dto.rsp.PendingSqlRsp;
+import com.devsync.dto.rsp.SqlEnvConfigRsp;
 import com.devsync.entity.Iteration;
 import com.devsync.entity.PendingSql;
 import com.devsync.entity.Project;
+import com.devsync.entity.SqlExecutionLog;
 import com.devsync.mapper.IterationMapper;
 import com.devsync.mapper.PendingSqlMapper;
 import com.devsync.mapper.ProjectMapper;
 import com.devsync.service.IPendingSqlService;
+import com.devsync.service.ISqlEnvConfigService;
+import com.devsync.service.ISqlExecutionLogService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -39,6 +48,8 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
     private final PendingSqlMapper pendingSqlMapper;
     private final ProjectMapper projectMapper;
     private final IterationMapper iterationMapper;
+    private final ISqlEnvConfigService sqlEnvConfigService;
+    private final ISqlExecutionLogService sqlExecutionLogService;
 
     @Override
     public PageResult<PendingSqlRsp> listSql(PendingSqlListReq req) {
@@ -49,16 +60,23 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
         wrapper.eq(req.getProjectId() != null, PendingSql::getProjectId, req.getProjectId())
                 .eq(req.getIterationId() != null, PendingSql::getIterationId, req.getIterationId())
                 .like(StrUtil.isNotBlank(req.getTitle()), PendingSql::getTitle, req.getTitle())
-                .eq(StrUtil.isNotBlank(req.getStatus()), PendingSql::getStatus, req.getStatus())
                 .orderByAsc(PendingSql::getExecutionOrder)
                 .orderByDesc(PendingSql::getCreatedAt);
+
+        if (StrUtil.isNotBlank(req.getStatus())) {
+            List<PendingSql> records = pendingSqlMapper.selectList(wrapper);
+            List<PendingSqlRsp> list = buildEnvExecution(records);
+            String normalized = normalizeStatus(req.getStatus());
+            List<PendingSqlRsp> filtered = list.stream()
+                    .filter(item -> normalized.equals(item.getStatus()))
+                    .toList();
+            return slicePage(filtered, req.getPageNum(), req.getPageSize());
+        }
 
         Page<PendingSql> page = new Page<>(req.getPageNum(), req.getPageSize());
         Page<PendingSql> result = pendingSqlMapper.selectPage(page, wrapper);
 
-        List<PendingSqlRsp> list = result.getRecords().stream()
-                .map(this::convertToRsp)
-                .collect(Collectors.toList());
+        List<PendingSqlRsp> list = buildEnvExecution(result.getRecords());
 
         return PageResult.of(list, result.getTotal(), result.getCurrent(), result.getSize());
     }
@@ -72,7 +90,8 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
             throw new BusinessException(404, "SQL不存在");
         }
 
-        return convertToRsp(sql);
+        List<PendingSqlRsp> list = buildEnvExecution(List.of(sql));
+        return list.isEmpty() ? null : list.get(0);
     }
 
     @Override
@@ -119,11 +138,6 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
         PendingSql sql = pendingSqlMapper.selectById(req.getId());
         if (sql == null) {
             throw new BusinessException(404, "SQL不存在");
-        }
-
-        // 已执行的SQL不允许修改
-        if (SqlStatusEnum.EXECUTED.getCode().equals(sql.getStatus())) {
-            throw new BusinessException(400, "已执行的SQL不允许修改");
         }
 
         // 验证迭代是否存在
@@ -177,16 +191,9 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
             throw new BusinessException(404, "SQL不存在");
         }
 
-        if (SqlStatusEnum.EXECUTED.getCode().equals(sql.getStatus())) {
-            throw new BusinessException(400, "SQL已执行，请勿重复操作");
-        }
-
-        sql.setStatus(SqlStatusEnum.EXECUTED.getCode());
-        sql.setExecutedAt(LocalDateTime.now());
-        sql.setExecutedEnv(req.getExecutedEnv());
-
-        pendingSqlMapper.updateById(sql);
-        log.info("[SQL管理] 标记SQL为已执行成功，ID: {}", req.getId());
+        String envCode = normalizeEnv(sql.getProjectId(), req.getExecutedEnv());
+        sqlExecutionLogService.createLog(sql.getId(), envCode, req.getExecutor(), req.getRemark());
+        log.info("[SQL管理] 标记SQL为已执行成功，ID: {}, 环境: {}", req.getId(), envCode);
     }
 
     @Override
@@ -201,18 +208,22 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
                 continue;
             }
 
-            if (SqlStatusEnum.EXECUTED.getCode().equals(sql.getStatus())) {
+            String envCode = normalizeEnv(sql.getProjectId(), req.getExecutedEnv());
+            try {
+                sqlExecutionLogService.createLog(sql.getId(), envCode, null, null);
+            } catch (BusinessException ex) {
                 log.warn("[SQL管理] SQL已执行，跳过: {}", id);
-                continue;
             }
-
-            sql.setStatus(SqlStatusEnum.EXECUTED.getCode());
-            sql.setExecutedAt(LocalDateTime.now());
-            sql.setExecutedEnv(req.getExecutedEnv());
-            pendingSqlMapper.updateById(sql);
         }
 
         log.info("[SQL管理] 批量标记SQL为已执行成功，数量: {}", req.getIds().size());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void revokeExecution(SqlExecutionRevokeReq req) {
+        log.info("[SQL管理] 撤销SQL执行，SQL ID: {}, 环境: {}", req.getSqlId(), req.getEnv());
+        sqlExecutionLogService.revokeLog(req.getSqlId(), req.getEnv());
     }
 
     @Override
@@ -221,19 +232,42 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
 
         LambdaQueryWrapper<PendingSql> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(PendingSql::getProjectId, projectId)
-                .eq(PendingSql::getStatus, SqlStatusEnum.PENDING.getCode())
                 .orderByAsc(PendingSql::getExecutionOrder);
 
-        List<PendingSql> list = pendingSqlMapper.selectList(wrapper);
+        List<PendingSqlRsp> list = buildEnvExecution(pendingSqlMapper.selectList(wrapper));
         return list.stream()
-                .map(this::convertToRsp)
+                .filter(item -> SqlExecutionStatusEnum.PENDING.getCode().equals(item.getStatus()))
                 .collect(Collectors.toList());
+    }
+
+    private List<PendingSqlRsp> buildEnvExecution(List<PendingSql> records) {
+        if (records.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> sqlIds = records.stream()
+                .map(PendingSql::getId)
+                .toList();
+        Map<Integer, List<SqlExecutionLog>> logsBySql = sqlExecutionLogService.listBySqlIds(sqlIds).stream()
+                .collect(Collectors.groupingBy(SqlExecutionLog::getSqlId));
+
+        List<Integer> projectIds = records.stream()
+                .map(PendingSql::getProjectId)
+                .distinct()
+                .toList();
+        Map<Integer, List<SqlEnvConfigRsp>> envByProject =
+                sqlEnvConfigService.listByProjectIds(projectIds);
+
+        return records.stream()
+                .map(sql -> convertToRsp(sql, envByProject, logsBySql))
+                .toList();
     }
 
     /**
      * 转换为响应对象
      */
-    private PendingSqlRsp convertToRsp(PendingSql sql) {
+    private PendingSqlRsp convertToRsp(PendingSql sql,
+                                       Map<Integer, List<SqlEnvConfigRsp>> envByProject,
+                                       Map<Integer, List<SqlExecutionLog>> logsBySql) {
         PendingSqlRsp rsp = new PendingSqlRsp();
         BeanUtil.copyProperties(sql, rsp);
 
@@ -251,12 +285,81 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
             }
         }
 
-        // 获取状态描述
-        SqlStatusEnum statusEnum = SqlStatusEnum.getByCode(sql.getStatus());
-        if (statusEnum != null) {
-            rsp.setStatusDesc(statusEnum.getDesc());
+        List<SqlEnvConfigRsp> envs = envByProject.getOrDefault(sql.getProjectId(), List.of());
+        Map<String, SqlExecutionLog> logByEnv = logsBySql.getOrDefault(sql.getId(), List.of()).stream()
+                .collect(Collectors.toMap(SqlExecutionLog::getEnv, log -> log, (a, b) -> a));
+
+        List<PendingSqlEnvExecutionRsp> envExecutionList = new ArrayList<>();
+        int executedCount = 0;
+        for (SqlEnvConfigRsp env : envs) {
+            SqlExecutionLog logEntity = logByEnv.get(env.getEnvCode());
+            PendingSqlEnvExecutionRsp envRsp = new PendingSqlEnvExecutionRsp();
+            envRsp.setEnvCode(env.getEnvCode());
+            envRsp.setEnvName(env.getEnvName());
+            envRsp.setExecuted(logEntity != null);
+            if (logEntity != null) {
+                envRsp.setExecutedAt(logEntity.getExecutedAt());
+                envRsp.setExecutor(logEntity.getExecutor());
+                envRsp.setRemark(logEntity.getRemark());
+                executedCount++;
+            }
+            envExecutionList.add(envRsp);
         }
 
+        rsp.setEnvExecutionList(envExecutionList);
+        rsp.setExecutedCount(executedCount);
+        rsp.setEnvTotal(envs.size());
+
+        SqlExecutionStatusEnum statusEnum = SqlExecutionStatusHelper.calculate(executedCount, envs.size());
+        rsp.setStatus(statusEnum.getCode());
+        rsp.setStatusDesc(statusEnum.getDesc());
+
+        logsBySql.getOrDefault(sql.getId(), List.of()).stream()
+                .max(Comparator.comparing(SqlExecutionLog::getExecutedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+                .ifPresentOrElse(latest -> {
+                    rsp.setExecutedAt(latest.getExecutedAt());
+                    rsp.setExecutedEnv(latest.getEnv());
+                }, () -> {
+                    rsp.setExecutedAt(null);
+                    rsp.setExecutedEnv("");
+                });
+
         return rsp;
+    }
+
+    private String normalizeStatus(String status) {
+        if (StrUtil.isBlank(status)) {
+            return status;
+        }
+        String normalized = status.trim().toLowerCase();
+        if (SqlStatusEnum.EXECUTED.getCode().equals(normalized)) {
+            return SqlExecutionStatusEnum.COMPLETED.getCode();
+        }
+        if (SqlStatusEnum.PENDING.getCode().equals(normalized)) {
+            return SqlExecutionStatusEnum.PENDING.getCode();
+        }
+        return normalized;
+    }
+
+    private PageResult<PendingSqlRsp> slicePage(List<PendingSqlRsp> list, Integer pageNum, Integer pageSize) {
+        int current = pageNum == null || pageNum <= 0 ? 1 : pageNum;
+        int size = pageSize == null || pageSize <= 0 ? 20 : pageSize;
+        int fromIndex = Math.min((current - 1) * size, list.size());
+        int toIndex = Math.min(fromIndex + size, list.size());
+        List<PendingSqlRsp> pageList = list.subList(fromIndex, toIndex);
+        return PageResult.of(pageList, (long) list.size(), (long) current, (long) size);
+    }
+
+    private String normalizeEnv(Integer projectId, String envCode) {
+        if (StrUtil.isBlank(envCode)) {
+            throw new BusinessException(400, "执行环境不能为空");
+        }
+        String normalized = envCode.trim().toLowerCase();
+        boolean exists = sqlEnvConfigService.listByProjectId(projectId).stream()
+                .anyMatch(env -> normalized.equals(env.getEnvCode()));
+        if (!exists) {
+            throw new BusinessException(400, "环境不存在，请先添加环境");
+        }
+        return normalized;
     }
 }

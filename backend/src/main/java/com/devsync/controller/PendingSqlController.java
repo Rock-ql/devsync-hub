@@ -4,7 +4,9 @@ import com.devsync.common.result.PageResult;
 import com.devsync.common.result.Result;
 import com.devsync.dto.req.*;
 import com.devsync.dto.rsp.PendingSqlRsp;
+import com.devsync.dto.rsp.SqlEnvConfigRsp;
 import com.devsync.service.IPendingSqlService;
+import com.devsync.service.ISqlEnvConfigService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,6 +29,7 @@ import java.util.List;
 public class PendingSqlController {
 
     private final IPendingSqlService pendingSqlService;
+    private final ISqlEnvConfigService sqlEnvConfigService;
 
     @PostMapping("/list")
     @Operation(summary = "分页查询SQL列表")
@@ -73,10 +76,25 @@ public class PendingSqlController {
         return Result.success();
     }
 
+    @PostMapping("/revoke-execution")
+    @Operation(summary = "撤销SQL执行")
+    public Result<Void> revokeExecution(@Valid @RequestBody SqlExecutionRevokeReq req) {
+        pendingSqlService.revokeExecution(req);
+        return Result.success();
+    }
+
     @PostMapping("/batch-execute")
     @Operation(summary = "批量标记SQL为已执行")
     public Result<Void> batchExecute(@Valid @RequestBody PendingSqlBatchExecuteReq req) {
         pendingSqlService.batchExecuteSql(req);
         return Result.success();
     }
+
+    @PostMapping("/env/list")
+    @Operation(summary = "获取项目环境列表")
+    public Result<List<SqlEnvConfigRsp>> listEnv(@Valid @RequestBody SqlEnvListReq req) {
+        return Result.success(sqlEnvConfigService.listByProjectId(req.getProjectId()));
+    }
+
+    // 环境固定为local/dev/test/smoke/prod，不提供自定义接口
 }
