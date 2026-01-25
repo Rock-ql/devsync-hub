@@ -14,7 +14,9 @@ import com.devsync.common.exception.BusinessException;
 import com.devsync.common.result.PageResult;
 import com.devsync.dto.req.ReportGenerateReq;
 import com.devsync.dto.req.ReportListReq;
+import com.devsync.dto.req.ReportMonthSummaryReq;
 import com.devsync.dto.req.ReportUpdateReq;
+import com.devsync.dto.rsp.ReportMonthSummaryRsp;
 import com.devsync.dto.rsp.ReportRsp;
 import com.devsync.entity.GitCommit;
 import com.devsync.entity.Project;
@@ -34,6 +36,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.HashMap;
@@ -399,6 +403,64 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
         reportMapper.deleteById(id);
         log.info("[报告管理] 删除报告成功，ID: {}", id);
+    }
+
+    @Override
+    public ReportMonthSummaryRsp getMonthSummary(ReportMonthSummaryReq req) {
+        log.info("[报告管理] 获取月度汇总，年份: {}, 月份: {}", req.getYear(), req.getMonth());
+
+        YearMonth yearMonth = YearMonth.of(req.getYear(), req.getMonth());
+        LocalDate monthStart = yearMonth.atDay(1);
+        LocalDate monthEnd = yearMonth.atEndOfMonth();
+
+        LambdaQueryWrapper<Report> dailyWrapper = new LambdaQueryWrapper<>();
+        dailyWrapper.eq(Report::getType, ReportTypeEnum.DAILY.getCode())
+                .ge(Report::getStartDate, monthStart)
+                .le(Report::getStartDate, monthEnd)
+                .orderByAsc(Report::getStartDate);
+
+        List<Report> dailyReports = reportMapper.selectList(dailyWrapper);
+
+        LambdaQueryWrapper<Report> weeklyWrapper = new LambdaQueryWrapper<>();
+        weeklyWrapper.eq(Report::getType, ReportTypeEnum.WEEKLY.getCode())
+                .le(Report::getStartDate, monthEnd)
+                .ge(Report::getEndDate, monthStart)
+                .orderByAsc(Report::getStartDate);
+
+        List<Report> weeklyReports = reportMapper.selectList(weeklyWrapper);
+
+        ReportMonthSummaryRsp rsp = new ReportMonthSummaryRsp();
+        rsp.setDailyReports(dailyReports.stream()
+                .map(report -> {
+                    ReportMonthSummaryRsp.DailyReportSummary item = new ReportMonthSummaryRsp.DailyReportSummary();
+                    item.setId(report.getId());
+                    item.setTitle(report.getTitle());
+                    item.setDate(report.getStartDate());
+                    return item;
+                })
+                .collect(Collectors.toList()));
+
+        rsp.setWeeklyReports(weeklyReports.stream()
+                .map(report -> {
+                    ReportMonthSummaryRsp.WeeklyReportSummary item = new ReportMonthSummaryRsp.WeeklyReportSummary();
+                    LocalDate anchorDate = report.getStartDate().isBefore(monthStart)
+                            ? monthStart
+                            : report.getStartDate();
+                    item.setWeekNumber(resolveWeekNumber(anchorDate, monthStart));
+                    item.setId(report.getId());
+                    item.setStartDate(report.getStartDate());
+                    item.setEndDate(report.getEndDate());
+                    return item;
+                })
+                .collect(Collectors.toList()));
+
+        return rsp;
+    }
+
+    private int resolveWeekNumber(LocalDate anchorDate, LocalDate monthStart) {
+        int offset = monthStart.getDayOfWeek().getValue() - 1;
+        int index = anchorDate.getDayOfMonth() + offset - 1;
+        return index / 7 + 1;
     }
 
     /**

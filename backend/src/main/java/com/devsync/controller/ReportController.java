@@ -4,7 +4,9 @@ import com.devsync.common.result.PageResult;
 import com.devsync.common.result.Result;
 import com.devsync.dto.req.ReportGenerateReq;
 import com.devsync.dto.req.ReportListReq;
+import com.devsync.dto.req.ReportMonthSummaryReq;
 import com.devsync.dto.req.ReportUpdateReq;
+import com.devsync.dto.rsp.ReportMonthSummaryRsp;
 import com.devsync.dto.rsp.ReportRsp;
 import com.devsync.service.IReportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -58,5 +60,11 @@ public class ReportController {
     public Result<Void> delete(@PathVariable Integer id) {
         reportService.deleteReport(id);
         return Result.success();
+    }
+
+    @PostMapping("/month-summary")
+    @Operation(summary = "获取报告月度汇总")
+    public Result<ReportMonthSummaryRsp> monthSummary(@Valid @RequestBody ReportMonthSummaryReq req) {
+        return Result.success(reportService.getMonthSummary(req));
     }
 }

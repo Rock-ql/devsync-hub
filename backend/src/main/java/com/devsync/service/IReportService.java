@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.devsync.common.result.PageResult;
 import com.devsync.dto.req.ReportGenerateReq;
 import com.devsync.dto.req.ReportListReq;
+import com.devsync.dto.req.ReportMonthSummaryReq;
 import com.devsync.dto.req.ReportUpdateReq;
+import com.devsync.dto.rsp.ReportMonthSummaryRsp;
 import com.devsync.dto.rsp.ReportRsp;
 import com.devsync.entity.Report;
 
@@ -52,4 +54,12 @@ public interface IReportService extends IService<Report> {
      * @param id 报告ID
      */
     void deleteReport(Integer id);
+
+    /**
+     * 获取月度汇总
+     *
+     * @param req 月度汇总请求
+     * @return 月度汇总结果
+     */
+    ReportMonthSummaryRsp getMonthSummary(ReportMonthSummaryReq req);
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { PageResult } from '@/api'
-import { Plus, Pencil, Trash2, GitBranch, GitCommit } from 'lucide-react'
+import { Plus, Pencil, Trash2, GitBranch, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface Project {
   id: number
@@ -41,10 +43,40 @@ interface GitLabBranch {
   name: string
 }
 
+interface IterationSummary {
+  id: number
+  name: string
+  status: string
+  statusDesc: string
+  startDate: string
+  endDate: string
+  pendingSqlCount: number
+}
+
+interface ProjectSqlSummary {
+  id: number
+  title: string
+  status: string
+  statusDesc: string
+  executedAt: string
+  executedEnv: string
+  iterationName: string
+}
+
+type DetailTab = 'overview' | 'commits' | 'iterations' | 'sql'
+
+const iterationStatusTone: Record<string, 'neutral' | 'info' | 'warning' | 'success'> = {
+  planning: 'neutral',
+  developing: 'info',
+  testing: 'warning',
+  released: 'success',
+}
+
 export default function Projects() {
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [isCommitsModalOpen, setIsCommitsModalOpen] = useState(false)
+  const [isDetailOpen, setIsDetailOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [formData, setFormData] = useState({
@@ -64,7 +96,27 @@ export default function Projects() {
   const { data: commitsData, isLoading: commitsLoading } = useQuery<GitCommitRecord[]>({
     queryKey: ['project-commits', selectedProject?.id],
     queryFn: () => api.get(`/project/commits/${selectedProject!.id}`),
-    enabled: !!selectedProject && isCommitsModalOpen,
+    enabled: !!selectedProject && isDetailOpen && activeTab === 'commits',
+  })
+
+  const { data: iterationData, isLoading: iterationsLoading } = useQuery<PageResult<IterationSummary>>({
+    queryKey: ['project-iterations', selectedProject?.id],
+    queryFn: () => api.post('/iteration/list', {
+      pageNum: 1,
+      pageSize: 100,
+      projectId: selectedProject?.id,
+    }),
+    enabled: !!selectedProject && isDetailOpen && activeTab === 'iterations',
+  })
+
+  const { data: sqlData, isLoading: sqlLoading } = useQuery<PageResult<ProjectSqlSummary>>({
+    queryKey: ['project-sql', selectedProject?.id],
+    queryFn: () => api.post('/sql/list', {
+      pageNum: 1,
+      pageSize: 100,
+      projectId: selectedProject?.id,
+    }),
+    enabled: !!selectedProject && isDetailOpen && activeTab === 'sql',
   })
 
   const canFetchBranches = Boolean(formData.gitlabUrl && formData.gitlabToken)
@@ -173,9 +225,10 @@ export default function Projects() {
     }
   }
 
-  const handleViewCommits = (project: Project) => {
+  const handleViewDetail = (project: Project) => {
     setSelectedProject(project)
-    setIsCommitsModalOpen(true)
+    setActiveTab('overview')
+    setIsDetailOpen(true)
   }
 
   const handleModalChange = (open: boolean) => {
@@ -185,8 +238,8 @@ export default function Projects() {
     }
   }
 
-  const handleCommitsModalChange = (open: boolean) => {
-    setIsCommitsModalOpen(open)
+  const handleDetailChange = (open: boolean) => {
+    setIsDetailOpen(open)
     if (!open) {
       setSelectedProject(null)
     }
@@ -194,6 +247,23 @@ export default function Projects() {
 
   const formatCommitDate = (dateStr: string) => {
     const date = new Date(dateStr)
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  const formatDateTime = (dateStr?: string) => {
+    if (!dateStr) {
+      return '-'
+    }
+    const date = new Date(dateStr)
+    if (Number.isNaN(date.getTime())) {
+      return dateStr
+    }
     return date.toLocaleString('zh-CN', {
       year: 'numeric',
       month: '2-digit',
@@ -229,7 +299,7 @@ export default function Projects() {
             <Card
               key={project.id}
               className="cursor-pointer transition-all hover:shadow-xl"
-              onClick={() => handleViewCommits(project)}
+              onClick={() => handleViewDetail(project)}
             >
               <CardHeader className="relative space-y-0">
                 <div className="min-w-0 space-y-2 pr-28">
@@ -244,28 +314,28 @@ export default function Projects() {
                   className="absolute right-6 top-6 flex items-center gap-2"
                   onClick={(e) => e.stopPropagation()}
                 >
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 w-9 p-0"
-                  onClick={() => handleEdit(project)}
-                  aria-label="编辑项目"
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
-                  onClick={() => {
-                    if (confirm('确定要删除此项目吗？')) {
-                      deleteMutation.mutate(project.id)
-                    }
-                  }}
-                  aria-label="删除项目"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 w-9 p-0"
+                    onClick={() => handleEdit(project)}
+                    aria-label="编辑项目"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
+                    onClick={() => {
+                      if (confirm('确定要删除此项目吗？')) {
+                        deleteMutation.mutate(project.id)
+                      }
+                    }}
+                    aria-label="删除项目"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -412,58 +482,261 @@ export default function Projects() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isCommitsModalOpen} onOpenChange={handleCommitsModalChange}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <GitCommit className="h-5 w-5 text-[hsl(var(--accent))]" />
-              {selectedProject?.name} - 提交记录
-            </DialogTitle>
-          </DialogHeader>
-          <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-2">
-            {commitsLoading ? (
-              <div className="text-center py-8 text-muted-foreground">加载中...</div>
-            ) : commitsData && commitsData.length > 0 ? (
-              commitsData.map((commit) => (
-                <div
-                  key={commit.id}
-                  className="rounded-xl border border-border bg-background/60 p-4 transition hover:bg-muted/60"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {commit.message}
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                        <span>{commit.authorName}</span>
-                        <span>{formatCommitDate(commit.committedAt)}</span>
-                        {(commit.additions > 0 || commit.deletions > 0) && (
-                          <span>
-                            <span className="text-emerald-600">
-                              +{commit.additions}
-                            </span>
-                            {' / '}
-                            <span className="text-red-600">
-                              -{commit.deletions}
-                            </span>
+      <Sheet open={isDetailOpen} onOpenChange={handleDetailChange}>
+        <SheetContent className="flex h-full flex-col">
+          <SheetHeader className="flex flex-row items-center justify-between gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 p-0"
+              onClick={() => setIsDetailOpen(false)}
+              aria-label="返回"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <SheetTitle className="min-w-0 flex-1 truncate">
+              {selectedProject?.name || '项目详情'}
+            </SheetTitle>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 p-0"
+                onClick={() => selectedProject && handleEdit(selectedProject)}
+                aria-label="编辑项目"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
+                onClick={() => {
+                  if (selectedProject && confirm('确定要删除此项目吗？')) {
+                    deleteMutation.mutate(selectedProject.id, {
+                      onSuccess: () => {
+                        setIsDetailOpen(false)
+                        setSelectedProject(null)
+                      },
+                    })
+                  }
+                }}
+                aria-label="删除项目"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </SheetHeader>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {selectedProject?.description || '暂无描述'}
+          </p>
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as DetailTab)}
+            className="mt-6 flex flex-1 flex-col"
+          >
+            <TabsList className="self-start">
+              <TabsTrigger value="overview">概览</TabsTrigger>
+              <TabsTrigger value="commits">Git记录</TabsTrigger>
+              <TabsTrigger value="iterations">迭代</TabsTrigger>
+              <TabsTrigger value="sql">SQL</TabsTrigger>
+            </TabsList>
+            <div className="mt-4 flex-1 overflow-y-auto pr-2">
+              <TabsContent value="overview" className="mt-0 space-y-4">
+                {selectedProject ? (
+                  <>
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">基本信息</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">创建时间</span>
+                          <span>{formatDateTime(selectedProject.createdAt)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">迭代数量</span>
+                          <span>{selectedProject.iterationCount} 个</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">待执行 SQL</span>
+                          <span>{selectedProject.pendingSqlCount} 条</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader className="flex flex-row items-center justify-between pb-3">
+                        <CardTitle className="text-base">GitLab 配置</CardTitle>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => selectedProject && syncMutation.mutate(selectedProject.id)}
+                          disabled={!selectedProject?.gitlabConfigured || syncMutation.isPending}
+                        >
+                          {syncMutation.isPending ? '同步中...' : '同步提交'}
+                        </Button>
+                      </CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-muted-foreground">仓库地址</span>
+                          <span className="max-w-[320px] truncate text-right">
+                            {selectedProject.gitlabUrl || '-'}
                           </span>
-                        )}
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">项目 ID</span>
+                          <span>{selectedProject.gitlabProjectId || '-'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">默认分支</span>
+                          <span>{selectedProject.gitlabBranch || '-'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">连接状态</span>
+                          {selectedProject.gitlabConfigured ? (
+                            <Badge tone="success" variant="soft">
+                              已连接
+                            </Badge>
+                          ) : (
+                            <Badge tone="neutral" variant="soft">
+                              未连接
+                            </Badge>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+                    暂无项目信息
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="commits" className="mt-0 space-y-3">
+                {commitsLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">加载中...</div>
+                ) : commitsData && commitsData.length > 0 ? (
+                  commitsData.map((commit) => (
+                    <div
+                      key={commit.id}
+                      className="rounded-xl border border-border bg-background/60 p-4 transition hover:bg-muted/60"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {commit.message}
+                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            <span>{commit.authorName}</span>
+                            <span>{formatCommitDate(commit.committedAt)}</span>
+                            {(commit.additions > 0 || commit.deletions > 0) && (
+                              <span>
+                                <span className="text-emerald-600">
+                                  +{commit.additions}
+                                </span>
+                                {' / '}
+                                <span className="text-red-600">
+                                  -{commit.deletions}
+                                </span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <code className="text-xs text-muted-foreground font-mono">
+                          {commit.commitId.substring(0, 8)}
+                        </code>
                       </div>
                     </div>
-                    <code className="text-xs text-muted-foreground font-mono">
-                      {commit.commitId.substring(0, 8)}
-                    </code>
+                  ))
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+                    暂无提交记录，请先配置 GitLab 并同步提交
                   </div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-                暂无提交记录，请先配置 GitLab 并同步提交
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+                )}
+              </TabsContent>
+
+              <TabsContent value="iterations" className="mt-0 space-y-3">
+                {iterationsLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">加载中...</div>
+                ) : iterationData && iterationData.list.length > 0 ? (
+                  iterationData.list.map((iteration) => (
+                    <div
+                      key={iteration.id}
+                      className="rounded-xl border border-border bg-background/60 p-4 transition hover:bg-muted/60"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {iteration.name}
+                          </p>
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            {iteration.startDate && iteration.endDate
+                              ? `${iteration.startDate} ~ ${iteration.endDate}`
+                              : '时间范围未设置'}
+                          </div>
+                        </div>
+                        <Badge
+                          variant="soft"
+                          tone={iterationStatusTone[iteration.status] || 'neutral'}
+                        >
+                          {iteration.statusDesc}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        待执行 SQL：{iteration.pendingSqlCount ?? 0} 条
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+                    暂无迭代数据
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="sql" className="mt-0 space-y-3">
+                {sqlLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">加载中...</div>
+                ) : sqlData && sqlData.list.length > 0 ? (
+                  sqlData.list.map((sql) => (
+                    <div
+                      key={sql.id}
+                      className="rounded-xl border border-border bg-background/60 p-4 transition hover:bg-muted/60"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {sql.title}
+                          </p>
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            {sql.iterationName ? `迭代：${sql.iterationName}` : '未关联迭代'}
+                          </div>
+                          {sql.status === 'executed' && (
+                            <div className="mt-2 text-xs text-muted-foreground">
+                              执行时间: {formatDateTime(sql.executedAt)} | 环境: {sql.executedEnv || '-'}
+                            </div>
+                          )}
+                        </div>
+                        <Badge
+                          variant="soft"
+                          tone={sql.status === 'pending' ? 'warning' : 'success'}
+                        >
+                          {sql.statusDesc}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+                    暂无 SQL 数据
+                  </div>
+                )}
+              </TabsContent>
+            </div>
+          </Tabs>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
