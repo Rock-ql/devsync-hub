@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
 import { EnvExecutionButtons } from '@/components/sql/EnvExecutionButtons'
 import { ExecuteConfirmDialog } from '@/components/sql/ExecuteConfirmDialog'
+import RequirementLinkDialog from '@/components/requirement/RequirementLinkDialog'
 
 interface EnvExecution {
   envCode: string
@@ -73,6 +74,8 @@ export default function SqlManagement() {
   const [executeRemark, setExecuteRemark] = useState('')
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
   const [previewSql, setPreviewSql] = useState<PendingSql | null>(null)
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false)
+  const [linkSqlId, setLinkSqlId] = useState<number | null>(null)
   const [formData, setFormData] = useState({
     projectId: '',
     iterationId: '',
@@ -237,6 +240,11 @@ export default function SqlManagement() {
   const handlePreviewSql = (sql: PendingSql) => {
     setPreviewSql(sql)
     setPreviewDialogOpen(true)
+  }
+
+  const handleOpenLink = (sqlId: number) => {
+    setLinkSqlId(sqlId)
+    setLinkDialogOpen(true)
   }
 
   if (isLoading) {
@@ -405,6 +413,13 @@ export default function SqlManagement() {
                         <Button
                           variant="secondary"
                           size="sm"
+                          onClick={() => handleOpenLink(sql.id)}
+                        >
+                          关联需求
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           onClick={() => handleOpenExecute(sql)}
                         >
                           执行
@@ -530,6 +545,17 @@ export default function SqlManagement() {
           </pre>
         </DialogContent>
       </Dialog>
+
+      <RequirementLinkDialog
+        open={linkDialogOpen}
+        onOpenChange={(open) => {
+          setLinkDialogOpen(open)
+          if (!open) {
+            setLinkSqlId(null)
+          }
+        }}
+        sqlId={linkSqlId || undefined}
+      />
 
       <Dialog open={isModalOpen} onOpenChange={handleModalChange}>
         <DialogContent className="max-w-2xl">
