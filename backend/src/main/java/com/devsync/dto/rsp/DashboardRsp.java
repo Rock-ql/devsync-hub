@@ -29,6 +29,9 @@ public class DashboardRsp {
     @Schema(description = "待执行SQL总数")
     private Integer pendingSqlCount;
 
+    @Schema(description = "需求总数")
+    private Integer requirementCount;
+
     @Schema(description = "今日提交数")
     private Integer todayCommitCount;
 

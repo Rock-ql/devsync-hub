@@ -17,6 +17,7 @@ import com.devsync.entity.Project;
 import com.devsync.mapper.IterationMapper;
 import com.devsync.mapper.PendingSqlMapper;
 import com.devsync.mapper.ProjectMapper;
+import com.devsync.mapper.RequirementMapper;
 import com.devsync.service.IIterationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,7 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
     private final IterationMapper iterationMapper;
     private final ProjectMapper projectMapper;
     private final PendingSqlMapper pendingSqlMapper;
+    private final RequirementMapper requirementMapper;
 
     @Override
     public PageResult<IterationRsp> listIterations(IterationListReq req) {
@@ -202,6 +204,7 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
 
         // 查询待执行SQL数量
         rsp.setPendingSqlCount(pendingSqlMapper.countPendingByIterationId(iteration.getId()));
+        rsp.setRequirementCount(requirementMapper.countByIterationId(iteration.getId()));
 
         return rsp;
     }

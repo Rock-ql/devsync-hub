@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import api from '@/api'
-import { FolderGit2, IterationCw, Database, GitCommit } from 'lucide-react'
+import { FolderGit2, IterationCw, Database, GitCommit, Target } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -20,6 +20,7 @@ interface DashboardData {
   iterationCount: number
   activeIterationCount: number
   pendingSqlCount: number
+  requirementCount: number
   todayCommitCount: number
   weekCommitCount: number
   recentProjects: Array<{
@@ -94,6 +95,12 @@ export default function Dashboard() {
       value: data?.pendingSqlCount || 0,
       icon: Database,
       subValue: data?.pendingSqlCount ? `${data.pendingSqlCount} 条待处理` : null,
+    },
+    {
+      name: '需求总数',
+      value: data?.requirementCount || 0,
+      icon: Target,
+      subValue: null,
     },
     {
       name: '本周提交',

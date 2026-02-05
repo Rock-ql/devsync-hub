@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { PageResult } from '@/api'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Pencil, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import RequirementList from '@/components/requirement/RequirementList'
 
 interface Iteration {
   id: number
@@ -23,6 +24,7 @@ interface Iteration {
   startDate: string
   endDate: string
   pendingSqlCount: number
+  requirementCount: number
 }
 
 interface Project {
@@ -48,6 +50,7 @@ export default function Iterations() {
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingIteration, setEditingIteration] = useState<Iteration | null>(null)
+  const [expandedIterations, setExpandedIterations] = useState<number[]>([])
   const [formData, setFormData] = useState({
     projectId: '',
     name: '',
@@ -142,6 +145,14 @@ export default function Iterations() {
     }
   }
 
+  const toggleRequirement = (iterationId: number) => {
+    setExpandedIterations((prev) => (
+      prev.includes(iterationId)
+        ? prev.filter((id) => id !== iterationId)
+        : [...prev, iterationId]
+    ))
+  }
+
   if (isLoading) {
     return <div className="text-center py-12 text-muted-foreground">加载中...</div>
   }
@@ -172,77 +183,105 @@ export default function Iterations() {
                 <th className="px-6 py-4">状态</th>
                 <th className="px-6 py-4">时间范围</th>
                 <th className="px-6 py-4">待执行 SQL</th>
+                <th className="px-6 py-4">关联需求</th>
                 <th className="px-6 py-4 text-right">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {iterations?.list?.length ? (
-                iterations.list.map((iteration) => (
-                  <tr key={iteration.id} className="hover:bg-muted/40">
-                    <td className="px-6 py-4 text-sm font-medium text-foreground">
-                      {iteration.name}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">
-                      {iteration.projectName}
-                    </td>
-                    <td className="px-6 py-4">
-                      <Select
-                        value={iteration.status}
-                        onChange={(e) => statusMutation.mutate({ id: iteration.id, status: e.target.value })}
-                        className={`h-10 text-xs ${statusStyles[iteration.status]}`}
-                      >
-                        <option value="planning">规划中</option>
-                        <option value="developing">开发中</option>
-                        <option value="testing">测试中</option>
-                        <option value="released">已上线</option>
-                      </Select>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">
-                      {iteration.startDate && iteration.endDate
-                        ? `${iteration.startDate} ~ ${iteration.endDate}`
-                        : '-'}
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      {iteration.pendingSqlCount > 0 ? (
-                        <Badge tone="warning" variant="soft">
-                          {iteration.pendingSqlCount} 条
-                        </Badge>
-                      ) : (
-                        <Badge tone="success" variant="soft">
-                          0
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-9 w-9 p-0"
-                        onClick={() => handleEdit(iteration)}
-                        aria-label="编辑迭代"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
-                        onClick={() => {
-                          if (confirm('确定要删除此迭代吗？')) {
-                            deleteMutation.mutate(iteration.id)
-                          }
-                        }}
-                        aria-label="删除迭代"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))
+                iterations.list.map((iteration) => {
+                  const isExpanded = expandedIterations.includes(iteration.id)
+                  return (
+                    <Fragment key={iteration.id}>
+                      <tr className="hover:bg-muted/40">
+                        <td className="px-6 py-4 text-sm font-medium text-foreground">
+                          {iteration.name}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-muted-foreground">
+                          {iteration.projectName}
+                        </td>
+                        <td className="px-6 py-4">
+                          <Select
+                            value={iteration.status}
+                            onChange={(e) => statusMutation.mutate({ id: iteration.id, status: e.target.value })}
+                            className={`h-10 text-xs ${statusStyles[iteration.status]}`}
+                          >
+                            <option value="planning">规划中</option>
+                            <option value="developing">开发中</option>
+                            <option value="testing">测试中</option>
+                            <option value="released">已上线</option>
+                          </Select>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-muted-foreground">
+                          {iteration.startDate && iteration.endDate
+                            ? `${iteration.startDate} ~ ${iteration.endDate}`
+                            : '-'}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          {iteration.pendingSqlCount > 0 ? (
+                            <Badge tone="warning" variant="soft">
+                              {iteration.pendingSqlCount} 条
+                            </Badge>
+                          ) : (
+                            <Badge tone="success" variant="soft">
+                              0
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1 px-2 text-xs"
+                            onClick={() => toggleRequirement(iteration.id)}
+                          >
+                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            {iteration.requirementCount || 0} 条
+                          </Button>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-9 w-9 p-0"
+                            onClick={() => handleEdit(iteration)}
+                            aria-label="编辑迭代"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
+                            onClick={() => {
+                              if (confirm('确定要删除此迭代吗？')) {
+                                deleteMutation.mutate(iteration.id)
+                              }
+                            }}
+                            aria-label="删除迭代"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                      {isExpanded ? (
+                        <tr>
+                          <td colSpan={7} className="px-6 pb-6 pt-2 bg-muted/20">
+                            <RequirementList
+                              iterationId={iteration.id}
+                              iterationName={iteration.name}
+                              projects={projects || []}
+                            />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  )
+                })
               ) : (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-6 py-10 text-center text-sm text-muted-foreground"
                   >
                     暂无迭代，请先新增迭代
@@ -276,6 +315,17 @@ export default function Iterations() {
                       SQL 清零
                     </Badge>
                   )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1 px-2 text-xs"
+                    onClick={() => toggleRequirement(iteration.id)}
+                  >
+                    {expandedIterations.includes(iteration.id)
+                      ? <ChevronDown className="h-4 w-4" />
+                      : <ChevronRight className="h-4 w-4" />}
+                    需求 {iteration.requirementCount || 0} 条
+                  </Button>
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {iteration.startDate && iteration.endDate
@@ -318,6 +368,15 @@ export default function Iterations() {
                     </Button>
                   </div>
                 </div>
+                {expandedIterations.includes(iteration.id) ? (
+                  <div className="rounded-xl border border-border/60 bg-muted/40 p-4">
+                    <RequirementList
+                      iterationId={iteration.id}
+                      iterationName={iteration.name}
+                      projects={projects || []}
+                    />
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           ))

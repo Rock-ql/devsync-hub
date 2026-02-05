@@ -14,6 +14,7 @@ import com.devsync.mapper.IterationMapper;
 import com.devsync.mapper.PendingSqlMapper;
 import com.devsync.mapper.ProjectMapper;
 import com.devsync.mapper.ProjectPendingCount;
+import com.devsync.mapper.RequirementMapper;
 import com.devsync.service.IDashboardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,7 @@ public class DashboardServiceImpl implements IDashboardService {
     private final IterationMapper iterationMapper;
     private final PendingSqlMapper pendingSqlMapper;
     private final GitCommitMapper gitCommitMapper;
+    private final RequirementMapper requirementMapper;
 
     @Override
     public DashboardRsp getOverview() {
@@ -73,6 +75,10 @@ public class DashboardServiceImpl implements IDashboardService {
         // 待执行SQL统计
         Integer pendingSqlCount = pendingSqlMapper.countPendingAll();
         rsp.setPendingSqlCount(pendingSqlCount == null ? 0 : pendingSqlCount);
+
+        // 需求统计
+        Long requirementCount = requirementMapper.selectCount(new LambdaQueryWrapper<>());
+        rsp.setRequirementCount(requirementCount == null ? 0 : requirementCount.intValue());
 
         // 提交统计
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
@@ -169,6 +175,7 @@ public class DashboardServiceImpl implements IDashboardService {
         }
 
         rsp.setPendingSqlCount(pendingSqlMapper.countPendingByIterationId(iteration.getId()));
+        rsp.setRequirementCount(requirementMapper.countByIterationId(iteration.getId()));
         return rsp;
     }
 }
