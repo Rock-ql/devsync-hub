@@ -50,4 +50,7 @@ public class IterationRsp {
 
     @Schema(description = "待执行SQL数量")
     private Integer pendingSqlCount;
+
+    @Schema(description = "关联需求数量")
+    private Integer requirementCount;
 }

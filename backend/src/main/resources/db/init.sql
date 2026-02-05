@@ -210,6 +210,55 @@ CREATE TABLE IF NOT EXISTS git_commit (
 
 COMMENT ON TABLE git_commit IS 'Git提交记录缓存表';
 
+-- 11. 需求表
+CREATE TABLE IF NOT EXISTS requirement (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    iteration_id INTEGER NOT NULL,
+    name VARCHAR(500) NOT NULL,
+    link VARCHAR(1000) DEFAULT '',
+    state INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP DEFAULT NULL
+);
+
+COMMENT ON TABLE requirement IS '需求表';
+COMMENT ON COLUMN requirement.iteration_id IS '归属迭代ID（必填）';
+COMMENT ON COLUMN requirement.name IS '需求名称';
+COMMENT ON COLUMN requirement.link IS '需求链接URL';
+
+-- 12. 需求-项目关联表
+CREATE TABLE IF NOT EXISTS requirement_project (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    requirement_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    state INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP DEFAULT NULL,
+    UNIQUE(requirement_id, project_id)
+);
+
+COMMENT ON TABLE requirement_project IS '需求-项目关联表';
+
+-- 13. 工作项关联表
+CREATE TABLE IF NOT EXISTS work_item_link (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    work_item_id INTEGER NOT NULL,
+    link_type VARCHAR(20) NOT NULL,
+    link_id INTEGER NOT NULL,
+    state INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP DEFAULT NULL,
+    UNIQUE(work_item_id, link_type, link_id)
+);
+
+COMMENT ON TABLE work_item_link IS '工作项关联表';
+
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_project_user_id ON project(user_id);
 CREATE INDEX IF NOT EXISTS idx_iteration_project_id ON iteration(project_id);
