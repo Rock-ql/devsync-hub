@@ -1,0 +1,42 @@
+import api from '@/api'
+
+export interface RequirementItem {
+  id: number
+  name: string
+  link?: string
+  iterationId: number
+  projectIds: number[]
+  projectNames: string[]
+  linkedSqlCount: number
+  linkedCommitCount: number
+  createdAt: string
+}
+
+export interface RequirementAddPayload {
+  iterationId: number
+  name: string
+  link?: string
+  projectIds?: number[]
+}
+
+export interface RequirementUpdatePayload {
+  id: number
+  name: string
+  link?: string
+  projectIds?: number[]
+}
+
+export interface RequirementLinkPayload {
+  requirementId: number
+  linkType: 'sql' | 'commit'
+  linkId: number
+}
+
+export const requirementApi = {
+  list: (iterationId: number, keyword?: string) =>
+    api.post<RequirementItem[]>('/requirement/list', { iterationId, keyword }),
+  add: (payload: RequirementAddPayload) => api.post<number>('/requirement/add', payload),
+  update: (payload: RequirementUpdatePayload) => api.post('/requirement/update', payload),
+  remove: (id: number) => api.post('/requirement/delete', { id }),
+  link: (payload: RequirementLinkPayload) => api.post('/requirement/link', payload),
+}
