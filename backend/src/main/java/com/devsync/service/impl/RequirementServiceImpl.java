@@ -162,7 +162,7 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
             throw new BusinessException(404, "需求不存在");
         }
 
-        String linkType = StrUtil.lowerCase(req.getLinkType());
+        String linkType = req.getLinkType().toLowerCase(java.util.Locale.ROOT);
         if (!SUPPORTED_LINK_TYPES.contains(linkType)) {
             throw new BusinessException(400, "无效的关联类型");
         }
