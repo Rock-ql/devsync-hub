@@ -134,6 +134,14 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             } else {
                 allCommits = gitCommitMapper.selectAllByTimeRange(startTime, endTime);
             }
+        } else if (reportType == ReportTypeEnum.DAILY && hasBlankBranch(allCommits)) {
+            log.info("[报告生成] 检测到提交缺少分支信息，尝试补全分支后重试归类");
+            syncAllProjectCommits(startTime, endTime);
+            if (StrUtil.isNotBlank(authorEmail)) {
+                allCommits = gitCommitMapper.selectAllByTimeRangeAndAuthor(startTime, endTime, authorEmail);
+            } else {
+                allCommits = gitCommitMapper.selectAllByTimeRange(startTime, endTime);
+            }
         }
 
         String settingTemplate = getSettingTemplate(req.getType());
@@ -321,6 +329,10 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         return sb.toString().trim();
     }
 
+    private boolean hasBlankBranch(List<GitCommit> commits) {
+        return commits.stream().anyMatch(commit -> StrUtil.isBlank(commit.getBranch()));
+    }
+
     private Map<Integer, Set<Integer>> loadRequirementProjectIds(List<Requirement> requirements) {
         List<Integer> requirementIds = requirements.stream()
                 .map(Requirement::getId)
@@ -346,29 +358,39 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                                          List<Requirement> requirements,
                                          Map<Integer, Set<Integer>> requirementProjectIds) {
         String branchName = StrUtil.blankToDefault(commit.getBranch(), "").toLowerCase();
-        boolean branchContainsAnyRequirementCode = false;
 
         for (Requirement requirement : requirements) {
             String requirementCode = StrUtil.blankToDefault(getRequirementCode(requirement), "").toLowerCase();
             if (StrUtil.isNotBlank(requirementCode) && branchName.contains(requirementCode)) {
-                branchContainsAnyRequirementCode = true;
                 return requirement;
             }
         }
 
-        if (branchContainsAnyRequirementCode) {
-            return null;
+        String messageCode = extractRequirementCodeFromText(commit.getMessage()).toLowerCase();
+        if (StrUtil.isNotBlank(messageCode)) {
+            for (Requirement requirement : requirements) {
+                String requirementCode = StrUtil.blankToDefault(getRequirementCode(requirement), "").toLowerCase();
+                if (messageCode.equals(requirementCode)) {
+                    return requirement;
+                }
+            }
         }
 
         if (commit.getProjectId() == null) {
             return null;
         }
 
+        List<Requirement> projectMatchedRequirements = new java.util.ArrayList<>();
+
         for (Requirement requirement : requirements) {
             Set<Integer> projectIds = requirementProjectIds.get(requirement.getId());
             if (projectIds != null && projectIds.contains(commit.getProjectId())) {
-                return requirement;
+                projectMatchedRequirements.add(requirement);
             }
+        }
+
+        if (projectMatchedRequirements.size() == 1) {
+            return projectMatchedRequirements.get(0);
         }
         return null;
     }
@@ -568,6 +590,18 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
         String requirementName = StrUtil.trimToEmpty(requirement.getName());
         Matcher matcher = REQUIREMENT_CODE_PATTERN.matcher(requirementName.toUpperCase());
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return "";
+    }
+
+    private String extractRequirementCodeFromText(String text) {
+        String normalized = StrUtil.trimToEmpty(text).toUpperCase();
+        if (StrUtil.isBlank(normalized)) {
+            return "";
+        }
+        Matcher matcher = REQUIREMENT_CODE_PATTERN.matcher(normalized);
         if (matcher.find()) {
             return matcher.group(1);
         }
