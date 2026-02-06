@@ -80,6 +80,7 @@ export default function Projects() {
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [syncingProjectId, setSyncingProjectId] = useState<number | null>(null)
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -243,8 +244,14 @@ export default function Projects() {
 
   const syncMutation = useMutation({
     mutationFn: (id: number) => api.post(`/project/sync-commits/${id}`),
+    onMutate: (id: number) => {
+      setSyncingProjectId(id)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+    onSettled: () => {
+      setSyncingProjectId(null)
     },
   })
 
@@ -429,9 +436,9 @@ export default function Projects() {
                       variant="ghost"
                       size="sm"
                       onClick={() => syncMutation.mutate(project.id)}
-                      disabled={syncMutation.isPending}
+                      disabled={syncingProjectId === project.id}
                     >
-                      {syncMutation.isPending ? '同步中...' : '同步提交'}
+                      {syncingProjectId === project.id ? '同步中...' : '同步提交'}
                     </Button>
                   </div>
                 )}
@@ -631,9 +638,9 @@ export default function Projects() {
                           variant="ghost"
                           size="sm"
                           onClick={() => selectedProject && syncMutation.mutate(selectedProject.id)}
-                          disabled={!selectedProject?.gitlabConfigured || syncMutation.isPending}
+                          disabled={!selectedProject?.gitlabConfigured || syncingProjectId === selectedProject?.id}
                         >
-                          {syncMutation.isPending ? '同步中...' : '同步提交'}
+                          {syncingProjectId === selectedProject?.id ? '同步中...' : '同步提交'}
                         </Button>
                       </CardHeader>
                       <CardContent className="space-y-3 text-sm">
