@@ -2,7 +2,6 @@ package com.devsync.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
-import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -24,6 +23,7 @@ import com.devsync.mapper.PendingSqlMapper;
 import com.devsync.mapper.ProjectMapper;
 import com.devsync.service.IProjectService;
 import com.devsync.service.ISqlEnvConfigService;
+import com.devsync.service.ISystemSettingService;
 import com.devsync.util.EncryptUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +50,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     private final GitLabClient gitLabClient;
     private final EncryptUtil encryptUtil;
     private final ISqlEnvConfigService sqlEnvConfigService;
+    private final ISystemSettingService systemSettingService;
+
+    private static final String GIT_GITLAB_TOKEN_KEY = "git.gitlab.token";
 
     @Override
     public PageResult<ProjectRsp> listProjects(ProjectListReq req) {
@@ -64,8 +67,10 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         Page<Project> page = new Page<>(req.getPageNum(), req.getPageSize());
         Page<Project> result = projectMapper.selectPage(page, wrapper);
 
+        boolean globalGitlabTokenConfigured = hasGlobalGitlabTokenConfigured();
+
         List<ProjectRsp> list = result.getRecords().stream()
-                .map(this::convertToRsp)
+                .map(project -> convertToRsp(project, globalGitlabTokenConfigured))
                 .collect(Collectors.toList());
 
         return PageResult.of(list, result.getTotal(), result.getCurrent(), result.getSize());
@@ -80,8 +85,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
                 .orderByDesc(Project::getCreatedAt);
 
         List<Project> projects = projectMapper.selectList(wrapper);
+        boolean globalGitlabTokenConfigured = hasGlobalGitlabTokenConfigured();
         return projects.stream()
-                .map(this::convertToRsp)
+                .map(project -> convertToRsp(project, globalGitlabTokenConfigured))
                 .collect(Collectors.toList());
     }
 
@@ -94,7 +100,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             throw new BusinessException(404, "项目不存在");
         }
 
-        return convertToRsp(project);
+        return convertToRsp(project, hasGlobalGitlabTokenConfigured());
     }
 
     @Override
@@ -117,13 +123,17 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             project.setGitlabToken(encryptUtil.encrypt(req.getGitlabToken()));
         }
 
+        String gitlabToken = StrUtil.isNotBlank(req.getGitlabToken())
+                ? req.getGitlabToken()
+                : resolveGitlabToken(project);
+
         // 如果未指定分支且配置了GitLab信息，尝试从远程获取默认分支
         if (StrUtil.isBlank(project.getGitlabBranch())
                 && StrUtil.isNotBlank(req.getGitlabUrl())
-                && StrUtil.isNotBlank(req.getGitlabToken())) {
+                && StrUtil.isNotBlank(gitlabToken)) {
             try {
                 List<GitLabClient.BranchInfo> branches = gitLabClient.listBranches(
-                        req.getGitlabUrl(), req.getGitlabToken(), req.getGitlabProjectId());
+                        req.getGitlabUrl(), gitlabToken, req.getGitlabProjectId());
                 branches.stream()
                         .filter(GitLabClient.BranchInfo::isDefaultBranch)
                         .findFirst()
@@ -213,12 +223,10 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             throw new BusinessException(404, "项目不存在");
         }
 
-        if (StrUtil.isBlank(project.getGitlabUrl()) || StrUtil.isBlank(project.getGitlabToken())) {
+        String token = resolveGitlabToken(project);
+        if (StrUtil.isBlank(project.getGitlabUrl()) || StrUtil.isBlank(token)) {
             throw new BusinessException(400, "请先配置GitLab信息");
         }
-
-        // 解密 Token
-        String token = encryptUtil.decrypt(project.getGitlabToken());
 
         // 调用 GitLab API 获取所有分支的提交记录
         List<GitCommit> commits = gitLabClient.getCommitsAllBranches(
@@ -285,10 +293,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             if (project == null) {
                 throw new BusinessException(404, "项目不存在");
             }
-            if (StrUtil.isBlank(project.getGitlabToken())) {
-                throw new BusinessException(400, "该项目未配置 GitLab Token");
+            if (StrUtil.isNotBlank(project.getGitlabToken())) {
+                gitlabToken = decryptToken(project.getGitlabToken());
             }
-            gitlabToken = encryptUtil.decrypt(project.getGitlabToken());
             // 如果前端也未传 URL 或 GitLab 项目ID，从数据库补充
             if (StrUtil.isBlank(gitlabUrl)) {
                 gitlabUrl = project.getGitlabUrl();
@@ -298,12 +305,17 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             }
         }
 
+        // 回退：使用全局 GitLab Token
+        if (StrUtil.isBlank(gitlabToken)) {
+            gitlabToken = resolveGlobalGitlabToken();
+        }
+
         // 最终校验：URL 和 Token 必须都有值
         if (StrUtil.isBlank(gitlabUrl)) {
             throw new BusinessException(400, "GitLab 仓库地址不能为空");
         }
         if (StrUtil.isBlank(gitlabToken)) {
-            throw new BusinessException(400, "GitLab Token 不能为空，请输入 Token 或指定已配置的项目");
+            throw new BusinessException(400, "GitLab Token 不能为空，请输入 Token 或在设置页配置全局 Token");
         }
 
         try {
@@ -325,26 +337,16 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         }
     }
 
-    private String maskToken(String token) {
-        if (StrUtil.isBlank(token)) {
-            return token;
-        }
-        if (token.length() <= 8) {
-            return "****";
-        }
-        return token.substring(0, 4) + "****" + token.substring(token.length() - 4);
-    }
-
     /**
      * 转换为响应对象
      */
-    private ProjectRsp convertToRsp(Project project) {
+    private ProjectRsp convertToRsp(Project project, boolean globalGitlabTokenConfigured) {
         ProjectRsp rsp = new ProjectRsp();
         BeanUtil.copyProperties(project, rsp);
 
         // 判断是否已配置GitLab
         rsp.setGitlabConfigured(StrUtil.isNotBlank(project.getGitlabUrl())
-                && StrUtil.isNotBlank(project.getGitlabToken())
+                && (StrUtil.isNotBlank(project.getGitlabToken()) || globalGitlabTokenConfigured)
                 && project.getGitlabProjectId() != null);
 
         // 查询迭代数量
@@ -354,5 +356,39 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         rsp.setPendingSqlCount(pendingSqlMapper.countPendingByProjectId(project.getId()));
 
         return rsp;
+    }
+
+    private String resolveGitlabToken(Project project) {
+        if (project == null) {
+            return resolveGlobalGitlabToken();
+        }
+        if (StrUtil.isNotBlank(project.getGitlabToken())) {
+            return decryptToken(project.getGitlabToken());
+        }
+        return resolveGlobalGitlabToken();
+    }
+
+    private String resolveGlobalGitlabToken() {
+        String globalEncryptedToken = systemSettingService.getSetting(GIT_GITLAB_TOKEN_KEY);
+        if (StrUtil.isBlank(globalEncryptedToken)) {
+            return null;
+        }
+        return decryptToken(globalEncryptedToken);
+    }
+
+    private String decryptToken(String encryptedToken) {
+        if (StrUtil.isBlank(encryptedToken)) {
+            return null;
+        }
+        try {
+            return encryptUtil.decrypt(encryptedToken);
+        } catch (Exception e) {
+            log.error("[项目管理] GitLab Token 解密失败", e);
+            throw new BusinessException(500, "GitLab Token 解析失败，请重新配置");
+        }
+    }
+
+    private boolean hasGlobalGitlabTokenConfigured() {
+        return StrUtil.isNotBlank(systemSettingService.getSetting(GIT_GITLAB_TOKEN_KEY));
     }
 }

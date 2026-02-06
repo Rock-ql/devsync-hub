@@ -122,10 +122,8 @@ export default function Projects() {
     enabled: !!selectedProject && isDetailOpen && activeTab === 'sql',
   })
 
-  // 新建模式：需要 URL + Token；编辑模式：有 URL + 项目 ID 即可（后端用存储的 Token）
-  const canFetchBranches = Boolean(
-    formData.gitlabUrl && (formData.gitlabToken || editingProject?.id),
-  )
+  // 仅需填写 URL：后端会按“项目 Token > 全局 Token”回退解析
+  const canFetchBranches = Boolean(formData.gitlabUrl)
 
   // 防抖：延迟触发分支查询，避免每次按键都请求
   const [debouncedBranchParams, setDebouncedBranchParams] = useState({
@@ -155,9 +153,7 @@ export default function Projects() {
     }
   }, [formData.gitlabUrl, formData.gitlabToken, formData.gitlabProjectId, editingProject?.id])
 
-  const canFetchDebouncedBranches = Boolean(
-    debouncedBranchParams.gitlabUrl && (debouncedBranchParams.gitlabToken || debouncedBranchParams.id),
-  )
+  const canFetchDebouncedBranches = Boolean(debouncedBranchParams.gitlabUrl)
 
   const branchQuery = useQuery<GitLabBranch[]>({
     queryKey: ['gitlab-branches', debouncedBranchParams.gitlabUrl, debouncedBranchParams.gitlabToken, debouncedBranchParams.gitlabProjectId, debouncedBranchParams.id],
@@ -491,7 +487,7 @@ export default function Projects() {
                 type="password"
                 value={formData.gitlabToken}
                 onChange={(e) => setFormData({ ...formData, gitlabToken: e.target.value })}
-                placeholder={editingProject ? '留空则不修改' : ''}
+                placeholder={editingProject ? '留空则不修改（可使用全局 Token）' : '留空则使用全局 Token'}
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -524,7 +520,7 @@ export default function Projects() {
                 )}
                 {!canFetchBranches && (
                   <p className="text-xs text-muted-foreground">
-                    {editingProject ? '填写 GitLab 地址后可动态获取分支' : '填写 GitLab 地址与 Token 后可动态获取分支'}
+                    填写 GitLab 地址后可动态获取分支（优先项目 Token，其次全局 Token）
                   </p>
                 )}
                 {branchQuery.isError && (

@@ -69,6 +69,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     private static final String DAILY_TEMPLATE_KEY = "report.template.daily";
     private static final String WEEKLY_TEMPLATE_KEY = "report.template.weekly";
     private static final String GIT_AUTHOR_EMAIL_KEY = "git.author.email";
+    private static final String GIT_GITLAB_TOKEN_KEY = "git.gitlab.token";
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -489,12 +490,12 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         List<Project> projects = projectMapper.selectList(wrapper);
 
         for (Project project : projects) {
-            if (StrUtil.isBlank(project.getGitlabUrl()) || StrUtil.isBlank(project.getGitlabToken())) {
+            String token = resolveGitlabToken(project);
+            if (StrUtil.isBlank(project.getGitlabUrl()) || StrUtil.isBlank(token)) {
                 continue;
             }
 
             try {
-                String token = encryptUtil.decrypt(project.getGitlabToken());
                 List<GitCommit> commits = gitLabClient.getCommitsByTimeRangeAllBranches(
                         project.getGitlabUrl(),
                         token,
@@ -514,6 +515,33 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             } catch (Exception e) {
                 log.error("[报告生成] 同步项目提交记录失败，项目: {}", project.getName(), e);
             }
+        }
+    }
+
+    private String resolveGitlabToken(Project project) {
+        if (project != null && StrUtil.isNotBlank(project.getGitlabToken())) {
+            return decryptToken(project.getGitlabToken());
+        }
+        return resolveGlobalGitlabToken();
+    }
+
+    private String resolveGlobalGitlabToken() {
+        String globalEncryptedToken = systemSettingService.getSetting(GIT_GITLAB_TOKEN_KEY);
+        if (StrUtil.isBlank(globalEncryptedToken)) {
+            return null;
+        }
+        return decryptToken(globalEncryptedToken);
+    }
+
+    private String decryptToken(String encryptedToken) {
+        if (StrUtil.isBlank(encryptedToken)) {
+            return null;
+        }
+        try {
+            return encryptUtil.decrypt(encryptedToken);
+        } catch (Exception e) {
+            log.error("[报告生成] GitLab Token 解密失败", e);
+            return null;
         }
     }
 

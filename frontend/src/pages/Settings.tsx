@@ -17,6 +17,7 @@ const SETTING_KEYS = {
   DAILY_TEMPLATE: 'report.template.daily',
   WEEKLY_TEMPLATE: 'report.template.weekly',
   GIT_AUTHOR_EMAIL: 'git.author.email',
+  GIT_GITLAB_TOKEN: 'git.gitlab.token',
 }
 
 interface ApiKey {
@@ -31,6 +32,7 @@ export default function Settings() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState('general')
   const [showApiKey, setShowApiKey] = useState(false)
+  const [showGitlabToken, setShowGitlabToken] = useState(false)
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyValue, setNewKeyValue] = useState('')
   const [copied, setCopied] = useState(false)
@@ -189,6 +191,29 @@ export default function Settings() {
                       placeholder="your-email@example.com"
                     />
                     <p className="text-xs text-muted-foreground">用于日报生成时过滤只属于你的提交记录，留空则获取所有人的提交</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>全局 GitLab Token</Label>
+                    <div className="relative">
+                      <Input
+                        type={showGitlabToken ? 'text' : 'password'}
+                        value={settingForm[SETTING_KEYS.GIT_GITLAB_TOKEN] || ''}
+                        onChange={(e) => setSettingForm({
+                          ...settingForm,
+                          [SETTING_KEYS.GIT_GITLAB_TOKEN]: e.target.value,
+                        })}
+                        placeholder={settings?.[SETTING_KEYS.GIT_GITLAB_TOKEN] ? '已配置，留空则不修改' : '所有项目共用，项目级 Token 可覆盖'}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowGitlabToken(!showGitlabToken)}
+                        aria-label={showGitlabToken ? '隐藏全局 GitLab Token' : '显示全局 GitLab Token'}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showGitlabToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                   </div>
                   <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
                     {updateSettingMutation.isPending ? '保存中...' : '保存设置'}

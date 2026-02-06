@@ -1,11 +1,13 @@
 package com.devsync.service.impl;
 
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.devsync.dto.req.SettingUpdateReq;
 import com.devsync.entity.SystemSetting;
 import com.devsync.mapper.SystemSettingMapper;
 import com.devsync.service.ISystemSettingService;
+import com.devsync.util.EncryptUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,7 +27,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class SystemSettingServiceImpl extends ServiceImpl<SystemSettingMapper, SystemSetting> implements ISystemSettingService {
 
+    private static final String GIT_GITLAB_TOKEN_KEY = "git.gitlab.token";
+    private static final String MASKED_CONFIGURED_VALUE = "****已配置";
+
     private final SystemSettingMapper systemSettingMapper;
+    private final EncryptUtil encryptUtil;
 
     @Override
     public Map<String, String> getAllSettings() {
@@ -38,6 +44,12 @@ public class SystemSettingServiceImpl extends ServiceImpl<SystemSettingMapper, S
 
         Map<String, String> result = new HashMap<>();
         for (SystemSetting setting : settings) {
+            if (isGitlabTokenKey(setting.getSettingKey())) {
+                result.put(setting.getSettingKey(), StrUtil.isNotBlank(setting.getSettingValue())
+                        ? MASKED_CONFIGURED_VALUE
+                        : "");
+                continue;
+            }
             result.put(setting.getSettingKey(), setting.getSettingValue());
         }
 
@@ -56,6 +68,10 @@ public class SystemSettingServiceImpl extends ServiceImpl<SystemSettingMapper, S
     @Transactional(rollbackFor = Exception.class)
     public void updateSetting(SettingUpdateReq req) {
         log.info("[系统设置] 更新设置，key: {}", req.getSettingKey());
+
+        if (isGitlabTokenKey(req.getSettingKey()) && StrUtil.isNotBlank(req.getSettingValue())) {
+            req.setSettingValue(encryptUtil.encrypt(req.getSettingValue()));
+        }
 
         SystemSetting setting = systemSettingMapper.selectByKey(req.getSettingKey());
 
@@ -91,5 +107,9 @@ public class SystemSettingServiceImpl extends ServiceImpl<SystemSettingMapper, S
         }
 
         log.info("[系统设置] 批量更新设置成功");
+    }
+
+    private boolean isGitlabTokenKey(String key) {
+        return GIT_GITLAB_TOKEN_KEY.equals(key);
     }
 }
