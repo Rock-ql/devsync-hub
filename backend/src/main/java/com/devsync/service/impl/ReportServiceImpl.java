@@ -42,6 +42,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -80,6 +81,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     private static final String GIT_AUTHOR_EMAIL_KEY = "git.author.email";
     private static final String GIT_GITLAB_TOKEN_KEY = "git.gitlab.token";
     private static final Pattern REQUIREMENT_CODE_PATTERN = Pattern.compile("([A-Za-z]+-\\d+)");
+    private static final long NEAREST_ANCHOR_MAX_MINUTES = 30L;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -286,6 +288,8 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             requirementCommits.computeIfAbsent(matched.getId(), key -> new java.util.ArrayList<>()).add(commit);
         }
 
+        otherCommits = assignUnmatchedCommitsByNearestAnchor(otherCommits, requirementCommits, codedRequirements);
+
         boolean hasMatchedRequirementCommits = requirementCommits.values().stream()
                 .anyMatch(list -> list != null && !list.isEmpty());
         if (!hasMatchedRequirementCommits) {
@@ -327,6 +331,72 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         appendOtherWorkByProject(sb, otherCommits, rule, projectNameMap);
 
         return sb.toString().trim();
+    }
+
+    private List<GitCommit> assignUnmatchedCommitsByNearestAnchor(List<GitCommit> unmatchedCommits,
+                                                                   Map<Integer, List<GitCommit>> requirementCommits,
+                                                                   List<Requirement> requirements) {
+        if (unmatchedCommits == null || unmatchedCommits.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Integer, Requirement> requirementMap = requirements.stream()
+                .collect(Collectors.toMap(Requirement::getId, requirement -> requirement, (a, b) -> a));
+
+        Map<Integer, List<RequirementAnchor>> anchorsByProject = new HashMap<>();
+        for (Map.Entry<Integer, List<GitCommit>> entry : requirementCommits.entrySet()) {
+            Integer requirementId = entry.getKey();
+            Requirement requirement = requirementMap.get(requirementId);
+            if (requirement == null || entry.getValue() == null) {
+                continue;
+            }
+
+            for (GitCommit commit : entry.getValue()) {
+                if (commit.getProjectId() == null || commit.getCommittedAt() == null) {
+                    continue;
+                }
+                anchorsByProject
+                        .computeIfAbsent(commit.getProjectId(), key -> new java.util.ArrayList<>())
+                        .add(new RequirementAnchor(requirement, commit));
+            }
+        }
+
+        List<GitCommit> stillUnmatched = new java.util.ArrayList<>();
+        for (GitCommit commit : unmatchedCommits) {
+            if (commit.getProjectId() == null || commit.getCommittedAt() == null) {
+                stillUnmatched.add(commit);
+                continue;
+            }
+
+            List<RequirementAnchor> anchors = anchorsByProject.get(commit.getProjectId());
+            if (anchors == null || anchors.isEmpty()) {
+                stillUnmatched.add(commit);
+                continue;
+            }
+
+            RequirementAnchor nearest = null;
+            long nearestMinutes = Long.MAX_VALUE;
+            for (RequirementAnchor anchor : anchors) {
+                if (anchor.commit.getCommittedAt() == null) {
+                    continue;
+                }
+                long minutes = Math.abs(Duration.between(anchor.commit.getCommittedAt(), commit.getCommittedAt()).toMinutes());
+                if (minutes < nearestMinutes) {
+                    nearestMinutes = minutes;
+                    nearest = anchor;
+                }
+            }
+
+            if (nearest != null && nearestMinutes <= NEAREST_ANCHOR_MAX_MINUTES) {
+                requirementCommits.computeIfAbsent(nearest.requirement.getId(), key -> new java.util.ArrayList<>())
+                        .add(commit);
+                log.debug("[报告生成] 提交命中需求(邻近锚点回退)，commitId={}, requirementCode={}, minutes={}",
+                        commit.getCommitId(), getRequirementCode(nearest.requirement), nearestMinutes);
+            } else {
+                stillUnmatched.add(commit);
+            }
+        }
+        return stillUnmatched;
     }
 
     private void appendOtherWorkByProject(StringBuilder sb,
@@ -895,6 +965,16 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             this.groupByProject = groupByProject;
             this.numbered = numbered;
             this.detailed = detailed;
+        }
+    }
+
+    private static class RequirementAnchor {
+        private final Requirement requirement;
+        private final GitCommit commit;
+
+        private RequirementAnchor(Requirement requirement, GitCommit commit) {
+            this.requirement = requirement;
+            this.commit = commit;
         }
     }
 }
