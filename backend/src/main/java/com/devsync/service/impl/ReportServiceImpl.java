@@ -324,9 +324,33 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         }
 
         sb.append("## 其他工作:\n");
-        appendCommitLines(sb, otherCommits, rule);
+        appendOtherWorkByProject(sb, otherCommits, rule, projectNameMap);
 
         return sb.toString().trim();
+    }
+
+    private void appendOtherWorkByProject(StringBuilder sb,
+                                          List<GitCommit> commits,
+                                          TemplateRule rule,
+                                          Map<Integer, String> projectNameMap) {
+        if (commits == null || commits.isEmpty()) {
+            sb.append("- 暂无其他工作\n");
+            return;
+        }
+
+        Map<Integer, List<GitCommit>> grouped = new LinkedHashMap<>();
+        for (GitCommit commit : commits) {
+            Integer projectId = commit.getProjectId() != null ? commit.getProjectId() : 0;
+            grouped.computeIfAbsent(projectId, key -> new java.util.ArrayList<>()).add(commit);
+        }
+
+        for (Map.Entry<Integer, List<GitCommit>> entry : grouped.entrySet()) {
+            Integer projectId = entry.getKey();
+            String projectName = projectNameMap.getOrDefault(projectId, projectId == 0 ? "未关联项目" : "项目" + projectId);
+            sb.append("### ").append(projectName).append("\n");
+            appendCommitLines(sb, entry.getValue(), rule);
+            sb.append("\n");
+        }
     }
 
     private boolean hasBlankBranch(List<GitCommit> commits) {
@@ -358,10 +382,12 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                                          List<Requirement> requirements,
                                          Map<Integer, Set<Integer>> requirementProjectIds) {
         String branchName = StrUtil.blankToDefault(commit.getBranch(), "").toLowerCase();
+        Set<String> branchCandidates = parseBranchCandidates(branchName);
 
         for (Requirement requirement : requirements) {
             String requirementCode = StrUtil.blankToDefault(getRequirementCode(requirement), "").toLowerCase();
-            if (StrUtil.isNotBlank(requirementCode) && branchName.contains(requirementCode)) {
+            if (StrUtil.isNotBlank(requirementCode)
+                    && branchCandidates.stream().anyMatch(candidate -> candidate.contains(requirementCode))) {
                 return requirement;
             }
         }
@@ -556,8 +582,9 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     }
 
     private String buildDailyTemplateReference(String template) {
+        String defaultReference = "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作\n2. 其他工作\n   1. 按项目分组列出";
         if (StrUtil.isBlank(template)) {
-            return "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作";
+            return defaultReference;
         }
 
         String[] lines = template.split("\\n");
@@ -577,7 +604,16 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
         String normalized = sb.toString().trim();
         if (StrUtil.isBlank(normalized)) {
-            return "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作";
+            return defaultReference;
+        }
+        if (!normalized.contains("今日工作内容")) {
+            normalized = "今日工作内容：\n" + normalized;
+        }
+        if (!normalized.contains("需求编号")) {
+            normalized += "\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作";
+        }
+        if (!normalized.contains("其他工作")) {
+            normalized += "\n2. 其他工作\n   1. 按项目分组列出";
         }
         return normalized;
     }
@@ -606,6 +642,27 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             return matcher.group(1);
         }
         return "";
+    }
+
+    private Set<String> parseBranchCandidates(String branchText) {
+        Set<String> result = new LinkedHashSet<>();
+        if (StrUtil.isBlank(branchText)) {
+            return result;
+        }
+
+        List<String> branches = StrUtil.split(branchText, ',');
+        if (branches == null || branches.isEmpty()) {
+            result.add(branchText);
+            return result;
+        }
+
+        for (String branch : branches) {
+            String normalized = StrUtil.trimToEmpty(branch).toLowerCase();
+            if (StrUtil.isNotBlank(normalized)) {
+                result.add(normalized);
+            }
+        }
+        return result;
     }
 
     @Override

@@ -190,10 +190,13 @@ public class GitLabClient {
             try {
                 List<GitCommit> branchCommits = getCommits(gitlabUrl, token, projectId, branch.getName());
                 for (GitCommit commit : branchCommits) {
-                    commitMap.computeIfAbsent(commit.getCommitId(), key -> {
+                    GitCommit existingCommit = commitMap.get(commit.getCommitId());
+                    if (existingCommit == null) {
                         commit.setBranch(branch.getName());
-                        return commit;
-                    });
+                        commitMap.put(commit.getCommitId(), commit);
+                    } else {
+                        appendBranchIfMissing(existingCommit, branch.getName());
+                    }
                 }
             } catch (Exception e) {
                 log.warn("[GitLab客户端] 获取分支 {} 的提交记录失败，跳过", branch.getName(), e);
@@ -231,10 +234,13 @@ public class GitLabClient {
                 List<GitCommit> branchCommits = getCommitsByTimeRange(
                         gitlabUrl, token, projectId, branch.getName(), since, until);
                 for (GitCommit commit : branchCommits) {
-                    commitMap.computeIfAbsent(commit.getCommitId(), key -> {
+                    GitCommit existingCommit = commitMap.get(commit.getCommitId());
+                    if (existingCommit == null) {
                         commit.setBranch(branch.getName());
-                        return commit;
-                    });
+                        commitMap.put(commit.getCommitId(), commit);
+                    } else {
+                        appendBranchIfMissing(existingCommit, branch.getName());
+                    }
                 }
             } catch (Exception e) {
                 log.warn("[GitLab客户端] 获取分支 {} 的时间范围提交记录失败，跳过", branch.getName(), e);
@@ -316,6 +322,28 @@ public class GitLabClient {
 
         log.info("[GitLab客户端] 获取分支列表成功，数量: {}", result.size());
         return result;
+    }
+
+    private void appendBranchIfMissing(GitCommit commit, String branchName) {
+        if (commit == null || StrUtil.isBlank(branchName)) {
+            return;
+        }
+
+        String currentBranch = StrUtil.blankToDefault(commit.getBranch(), "");
+        if (StrUtil.isBlank(currentBranch)) {
+            commit.setBranch(branchName);
+            return;
+        }
+
+        List<String> branches = StrUtil.split(currentBranch, ',');
+        if (branches != null) {
+            for (String branch : branches) {
+                if (branchName.equals(StrUtil.trim(branch))) {
+                    return;
+                }
+            }
+        }
+        commit.setBranch(currentBranch + "," + branchName);
     }
 
     private List<GitCommit> doGetCommits(String apiBaseUrl, String projectIdentifier, String token, String branch) {
