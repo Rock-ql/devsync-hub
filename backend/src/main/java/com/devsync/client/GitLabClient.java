@@ -19,7 +19,9 @@ import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -163,6 +165,84 @@ public class GitLabClient {
             }
             throw e;
         }
+    }
+
+    /**
+     * 获取所有活跃分支的提交记录（按commitId去重，保留首次出现的分支）
+     *
+     * @param gitlabUrl   GitLab仓库地址
+     * @param token       Access Token
+     * @param projectId   项目ID
+     * @return 提交记录列表（已设置branch字段）
+     */
+    public List<GitCommit> getCommitsAllBranches(String gitlabUrl, String token, Integer projectId) {
+        log.info("[GitLab客户端] 获取所有分支的提交记录，URL: {}, 项目ID: {}", gitlabUrl, projectId);
+
+        List<BranchInfo> branches = listBranches(gitlabUrl, token, projectId);
+        if (branches.isEmpty()) {
+            log.warn("[GitLab客户端] 未获取到任何分支");
+            return List.of();
+        }
+
+        // 按commitId去重，保留首次出现的分支
+        Map<String, GitCommit> commitMap = new LinkedHashMap<>();
+        for (BranchInfo branch : branches) {
+            try {
+                List<GitCommit> branchCommits = getCommits(gitlabUrl, token, projectId, branch.getName());
+                for (GitCommit commit : branchCommits) {
+                    commitMap.computeIfAbsent(commit.getCommitId(), key -> {
+                        commit.setBranch(branch.getName());
+                        return commit;
+                    });
+                }
+            } catch (Exception e) {
+                log.warn("[GitLab客户端] 获取分支 {} 的提交记录失败，跳过", branch.getName(), e);
+            }
+        }
+
+        log.info("[GitLab客户端] 所有分支提交记录获取完成，去重后数量: {}", commitMap.size());
+        return new ArrayList<>(commitMap.values());
+    }
+
+    /**
+     * 获取所有活跃分支在指定时间范围内的提交记录（按commitId去重）
+     *
+     * @param gitlabUrl   GitLab仓库地址
+     * @param token       Access Token
+     * @param projectId   项目ID
+     * @param since       开始时间
+     * @param until       结束时间
+     * @return 提交记录列表（已设置branch字段）
+     */
+    public List<GitCommit> getCommitsByTimeRangeAllBranches(String gitlabUrl, String token, Integer projectId,
+                                                             LocalDateTime since, LocalDateTime until) {
+        log.info("[GitLab客户端] 获取所有分支时间范围内的提交记录，项目ID: {}, since: {}, until: {}",
+                projectId, since, until);
+
+        List<BranchInfo> branches = listBranches(gitlabUrl, token, projectId);
+        if (branches.isEmpty()) {
+            log.warn("[GitLab客户端] 未获取到任何分支");
+            return List.of();
+        }
+
+        Map<String, GitCommit> commitMap = new LinkedHashMap<>();
+        for (BranchInfo branch : branches) {
+            try {
+                List<GitCommit> branchCommits = getCommitsByTimeRange(
+                        gitlabUrl, token, projectId, branch.getName(), since, until);
+                for (GitCommit commit : branchCommits) {
+                    commitMap.computeIfAbsent(commit.getCommitId(), key -> {
+                        commit.setBranch(branch.getName());
+                        return commit;
+                    });
+                }
+            } catch (Exception e) {
+                log.warn("[GitLab客户端] 获取分支 {} 的时间范围提交记录失败，跳过", branch.getName(), e);
+            }
+        }
+
+        log.info("[GitLab客户端] 所有分支时间范围提交记录获取完成，去重后数量: {}", commitMap.size());
+        return new ArrayList<>(commitMap.values());
     }
 
     /**

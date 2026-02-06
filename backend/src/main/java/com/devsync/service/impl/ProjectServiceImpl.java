@@ -206,7 +206,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Integer syncCommits(Integer id) {
-        log.info("[项目管理] 同步GitLab提交记录，项目ID: {}", id);
+        log.info("[项目管理] 同步GitLab提交记录（全分支），项目ID: {}", id);
 
         Project project = projectMapper.selectById(id);
         if (project == null) {
@@ -220,12 +220,11 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         // 解密 Token
         String token = encryptUtil.decrypt(project.getGitlabToken());
 
-        // 调用 GitLab API 获取提交记录
-        List<GitCommit> commits = gitLabClient.getCommits(
+        // 调用 GitLab API 获取所有分支的提交记录
+        List<GitCommit> commits = gitLabClient.getCommitsAllBranches(
                 project.getGitlabUrl(),
                 token,
-                project.getGitlabProjectId(),
-                project.getGitlabBranch()
+                project.getGitlabProjectId()
         );
 
         // 保存提交记录
@@ -241,7 +240,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             }
         }
 
-        log.info("[项目管理] 同步GitLab提交记录完成，项目ID: {}, 新增: {}", id, count);
+        log.info("[项目管理] 同步GitLab提交记录完成（全分支），项目ID: {}, 新增: {}", id, count);
         return count;
     }
 

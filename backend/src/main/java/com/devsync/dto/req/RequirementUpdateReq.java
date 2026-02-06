@@ -35,4 +35,8 @@ public class RequirementUpdateReq {
 
     @Schema(description = "需求状态")
     private String status;
+
+    @Size(max = 200, message = "分支名称不能超过200个字符")
+    @Schema(description = "关联Git分支名称")
+    private String branch;
 }

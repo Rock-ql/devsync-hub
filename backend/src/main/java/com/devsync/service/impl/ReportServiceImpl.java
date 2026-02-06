@@ -68,6 +68,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
     private static final String DAILY_TEMPLATE_KEY = "report.template.daily";
     private static final String WEEKLY_TEMPLATE_KEY = "report.template.weekly";
+    private static final String GIT_AUTHOR_EMAIL_KEY = "git.author.email";
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -95,17 +96,33 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             }
         }
 
-        // 获取所有项目的提交记录
+        // 获取所有项目的提交记录（支持按作者邮箱过滤）
         LocalDateTime startTime = req.getStartDate().atStartOfDay();
         LocalDateTime endTime = req.getEndDate().atTime(LocalTime.MAX);
 
-        List<GitCommit> allCommits = gitCommitMapper.selectAllByTimeRange(startTime, endTime);
+        // 确定作者邮箱：优先使用请求参数，其次使用系统设置
+        String authorEmail = StrUtil.blankToDefault(req.getAuthorEmail(), null);
+        if (StrUtil.isBlank(authorEmail)) {
+            authorEmail = systemSettingService.getSetting(GIT_AUTHOR_EMAIL_KEY);
+        }
+
+        List<GitCommit> allCommits;
+        if (StrUtil.isNotBlank(authorEmail)) {
+            log.info("[报告生成] 按作者邮箱过滤提交记录，authorEmail: {}", authorEmail);
+            allCommits = gitCommitMapper.selectAllByTimeRangeAndAuthor(startTime, endTime, authorEmail);
+        } else {
+            allCommits = gitCommitMapper.selectAllByTimeRange(startTime, endTime);
+        }
 
         // 如果缓存中没有提交记录，尝试从 GitLab 同步
         if (allCommits.isEmpty()) {
             log.info("[报告生成] 缓存中无提交记录，尝试从GitLab同步");
             syncAllProjectCommits(startTime, endTime);
-            allCommits = gitCommitMapper.selectAllByTimeRange(startTime, endTime);
+            if (StrUtil.isNotBlank(authorEmail)) {
+                allCommits = gitCommitMapper.selectAllByTimeRangeAndAuthor(startTime, endTime, authorEmail);
+            } else {
+                allCommits = gitCommitMapper.selectAllByTimeRange(startTime, endTime);
+            }
         }
 
         String settingTemplate = getSettingTemplate(req.getType());
@@ -464,7 +481,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     }
 
     /**
-     * 同步所有项目的提交记录
+     * 同步所有项目的提交记录（全分支）
      */
     private void syncAllProjectCommits(LocalDateTime startTime, LocalDateTime endTime) {
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
@@ -478,11 +495,10 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
             try {
                 String token = encryptUtil.decrypt(project.getGitlabToken());
-                List<GitCommit> commits = gitLabClient.getCommitsByTimeRange(
+                List<GitCommit> commits = gitLabClient.getCommitsByTimeRangeAllBranches(
                         project.getGitlabUrl(),
                         token,
                         project.getGitlabProjectId(),
-                        project.getGitlabBranch(),
                         startTime,
                         endTime
                 );

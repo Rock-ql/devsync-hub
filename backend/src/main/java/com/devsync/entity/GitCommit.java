@@ -57,4 +57,9 @@ public class GitCommit extends BaseEntity {
      * 删除行数
      */
     private Integer deletions;
+
+    /**
+     * 所属分支名称
+     */
+    private String branch;
 }

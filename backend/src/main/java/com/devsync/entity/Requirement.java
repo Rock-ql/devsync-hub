@@ -35,4 +35,9 @@ public class Requirement extends BaseEntity {
      * 需求状态
      */
     private String status;
+
+    /**
+     * 关联Git分支名称
+     */
+    private String branch;
 }

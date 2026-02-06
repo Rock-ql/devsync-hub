@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS git_commit (
     committed_at TIMESTAMP NOT NULL,
     additions INTEGER DEFAULT 0,
     deletions INTEGER DEFAULT 0,
+    branch VARCHAR(200) NOT NULL DEFAULT '',
     state INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -226,6 +227,11 @@ CREATE TABLE IF NOT EXISTS git_commit (
 );
 
 COMMENT ON TABLE git_commit IS 'Git提交记录缓存表';
+COMMENT ON COLUMN git_commit.branch IS '所属分支名称';
+
+-- 兼容旧库：CREATE TABLE IF NOT EXISTS 不会自动补字段
+ALTER TABLE git_commit
+    ADD COLUMN IF NOT EXISTS branch VARCHAR(200) NOT NULL DEFAULT '';
 
 -- 11. 需求表
 CREATE TABLE IF NOT EXISTS requirement (
@@ -235,6 +241,7 @@ CREATE TABLE IF NOT EXISTS requirement (
     name VARCHAR(500) NOT NULL,
     link VARCHAR(1000) DEFAULT '',
     status VARCHAR(30) NOT NULL DEFAULT 'presented',
+    branch VARCHAR(200) NOT NULL DEFAULT '',
     state INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -245,11 +252,15 @@ CREATE TABLE IF NOT EXISTS requirement (
 ALTER TABLE requirement
     ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'presented';
 
+ALTER TABLE requirement
+    ADD COLUMN IF NOT EXISTS branch VARCHAR(200) NOT NULL DEFAULT '';
+
 COMMENT ON TABLE requirement IS '需求表';
 COMMENT ON COLUMN requirement.iteration_id IS '归属迭代ID（必填）';
 COMMENT ON COLUMN requirement.name IS '需求名称';
 COMMENT ON COLUMN requirement.link IS '需求链接URL';
 COMMENT ON COLUMN requirement.status IS '需求状态';
+COMMENT ON COLUMN requirement.branch IS '关联Git分支名称';
 
 -- 12. 需求-项目关联表
 CREATE TABLE IF NOT EXISTS requirement_project (

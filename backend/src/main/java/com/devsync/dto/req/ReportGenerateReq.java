@@ -30,4 +30,7 @@ public class ReportGenerateReq {
 
     @Schema(description = "模板ID（可选，不传则使用默认模板）")
     private Integer templateId;
+
+    @Schema(description = "作者邮箱（可选，不传则使用系统设置中的邮箱，留空获取所有人的提交）")
+    private String authorEmail;
 }

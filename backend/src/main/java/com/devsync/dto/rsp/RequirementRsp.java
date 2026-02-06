@@ -45,6 +45,9 @@ public class RequirementRsp {
     @Schema(description = "关联提交数量")
     private Integer linkedCommitCount;
 
+    @Schema(description = "关联Git分支名称")
+    private String branch;
+
     @Schema(description = "创建时间")
     private LocalDateTime createdAt;
 }

@@ -119,6 +119,7 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
         requirement.setIterationId(req.getIterationId());
         requirement.setName(req.getName());
         requirement.setLink(StrUtil.blankToDefault(req.getLink(), ""));
+        requirement.setBranch(StrUtil.blankToDefault(req.getBranch(), ""));
 
         String status = StrUtil.blankToDefault(req.getStatus(), RequirementStatusEnum.PRESENTED.getCode());
         RequirementStatusEnum statusEnum = RequirementStatusEnum.getByCode(status);
@@ -145,6 +146,7 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
 
         requirement.setName(req.getName());
         requirement.setLink(StrUtil.blankToDefault(req.getLink(), ""));
+        requirement.setBranch(StrUtil.blankToDefault(req.getBranch(), ""));
 
         if (StrUtil.isNotBlank(req.getStatus())) {
             RequirementStatusEnum targetStatus = RequirementStatusEnum.getByCode(req.getStatus());

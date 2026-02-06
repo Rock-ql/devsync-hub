@@ -37,4 +37,7 @@ public class GitCommitRsp {
 
     @Schema(description = "删除行数")
     private Integer deletions;
+
+    @Schema(description = "所属分支名称")
+    private String branch;
 }

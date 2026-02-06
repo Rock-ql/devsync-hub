@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Link2, Pencil, Plus, Trash2, GitBranch } from 'lucide-react'
 import { requirementApi, RequirementItem } from '@/api/requirement'
 import RequirementDialog from '@/components/requirement/RequirementDialog'
 import { Button } from '@/components/ui/button'
@@ -153,6 +153,12 @@ export default function RequirementList({ iterationId, iterationName, projects }
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant="soft" tone="neutral">{item.statusDesc || '已宣讲'}</Badge>
+                {item.branch && (
+                  <Badge variant="soft" tone="accent">
+                    <GitBranch className="mr-1 h-3 w-3" />
+                    {item.branch}
+                  </Badge>
+                )}
                 <Badge variant="soft" tone="info">SQL {item.linkedSqlCount || 0}</Badge>
                 <Badge variant="soft" tone="neutral">提交 {item.linkedCommitCount || 0}</Badge>
               </div>

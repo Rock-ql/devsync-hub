@@ -37,6 +37,7 @@ interface GitCommitRecord {
   committedAt: string
   additions: number
   deletions: number
+  branch?: string
 }
 
 interface GitLabBranch {
@@ -697,6 +698,12 @@ export default function Projects() {
                           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                             <span>{commit.authorName}</span>
                             <span>{formatCommitDate(commit.committedAt)}</span>
+                            {commit.branch && (
+                              <Badge variant="soft" tone="accent" className="text-xs">
+                                <GitBranch className="mr-1 h-3 w-3" />
+                                {commit.branch}
+                              </Badge>
+                            )}
                             {(commit.additions > 0 || commit.deletions > 0) && (
                               <span>
                                 <span className="text-emerald-600">

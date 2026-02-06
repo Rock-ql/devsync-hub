@@ -36,6 +36,7 @@ export default function RequirementDialog({
   const [link, setLink] = useState('')
   const [selectedProjectIds, setSelectedProjectIds] = useState<number[]>([])
   const [status, setStatus] = useState('presented')
+  const [branch, setBranch] = useState('')
 
   const statusOptions = [
     { code: 'presented', desc: '已宣讲' },
@@ -57,6 +58,7 @@ export default function RequirementDialog({
       setLink(initialData?.link || '')
       setSelectedProjectIds(initialData?.projectIds || [])
       setStatus(initialData?.status || 'presented')
+      setBranch(initialData?.branch || '')
     }
   }, [open, initialData])
 
@@ -89,6 +91,7 @@ export default function RequirementDialog({
           link: link.trim(),
           projectIds: selectedProjectIds,
           status,
+          branch: branch.trim(),
         })
       }
       return requirementApi.add({
@@ -97,6 +100,7 @@ export default function RequirementDialog({
         link: link.trim(),
         projectIds: selectedProjectIds,
         status,
+        branch: branch.trim(),
       })
     },
     onSuccess: () => {
@@ -173,6 +177,16 @@ export default function RequirementDialog({
                 </option>
               ))}
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>关联分支</Label>
+            <Input
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              placeholder="如 feat/user-auth"
+            />
+            <p className="text-xs text-muted-foreground">填写该需求对应的开发分支名称</p>
           </div>
         </div>
         <DialogFooter className="pt-2">

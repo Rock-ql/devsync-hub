@@ -7,6 +7,7 @@ export interface RequirementItem {
   iterationId: number
   status?: string
   statusDesc?: string
+  branch?: string
   projectIds: number[]
   projectNames: string[]
   linkedSqlCount: number
@@ -20,6 +21,7 @@ export interface RequirementAddPayload {
   link?: string
   projectIds?: number[]
   status?: string
+  branch?: string
 }
 
 export interface RequirementUpdatePayload {
@@ -28,6 +30,7 @@ export interface RequirementUpdatePayload {
   link?: string
   projectIds?: number[]
   status?: string
+  branch?: string
 }
 
 export interface RequirementStatusUpdatePayload {

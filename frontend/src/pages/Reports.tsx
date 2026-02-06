@@ -68,12 +68,18 @@ export default function Reports() {
     type: 'daily',
     startDate: format(today, 'yyyy-MM-dd'),
     endDate: format(today, 'yyyy-MM-dd'),
+    authorEmail: '',
   })
   const [isEditing, setIsEditing] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [editForm, setEditForm] = useState({ title: '', content: '' })
   const [copySuccess, setCopySuccess] = useState(false)
   const { confirmLeave } = useUnsavedWarning(hasUnsavedChanges)
+
+  const { data: settings } = useQuery<Record<string, string>>({
+    queryKey: ['settings'],
+    queryFn: () => api.get('/setting/all'),
+  })
 
   const monthStart = startOfMonth(selectedMonth)
   const monthEnd = endOfMonth(selectedMonth)
@@ -246,13 +252,14 @@ export default function Reports() {
   }
 
   const openGenerateWithPanel = () => {
+    const savedEmail = settings?.['git.author.email'] || ''
     if (panelState.mode === 'daily') {
       const dateValue = format(panelState.date, 'yyyy-MM-dd')
-      setGenerateForm({ type: 'daily', startDate: dateValue, endDate: dateValue })
+      setGenerateForm({ type: 'daily', startDate: dateValue, endDate: dateValue, authorEmail: savedEmail })
     } else {
       const startValue = format(panelState.week.weekStart, 'yyyy-MM-dd')
       const endValue = format(panelState.week.weekEnd, 'yyyy-MM-dd')
-      setGenerateForm({ type: 'weekly', startDate: startValue, endDate: endValue })
+      setGenerateForm({ type: 'weekly', startDate: startValue, endDate: endValue, authorEmail: savedEmail })
     }
     setIsGenerateModalOpen(true)
   }
@@ -290,7 +297,11 @@ export default function Reports() {
           <div className="rounded-full bg-muted px-4 py-2 text-xs text-muted-foreground">
             本月统计: 日报 {dailyCompleted}/{dailyTotal} 周报 {weeklyCompleted}/{weeklyTotal}
           </div>
-          <Button onClick={() => setIsGenerateModalOpen(true)}>
+          <Button onClick={() => {
+            const savedEmail = settings?.['git.author.email'] || ''
+            setGenerateForm((prev) => ({ ...prev, authorEmail: savedEmail }))
+            setIsGenerateModalOpen(true)
+          }}>
             <Sparkles className="h-4 w-4" />
             生成报告
           </Button>
@@ -579,6 +590,15 @@ export default function Reports() {
                   required
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>作者邮箱</Label>
+              <Input
+                value={generateForm.authorEmail}
+                onChange={(e) => setGenerateForm({ ...generateForm, authorEmail: e.target.value })}
+                placeholder="留空则获取所有人的提交"
+              />
+              <p className="text-xs text-muted-foreground">默认读取系统设置中的 Git 作者邮箱，可在此覆盖</p>
             </div>
             <DialogFooter className="pt-2">
               <Button

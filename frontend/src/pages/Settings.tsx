@@ -16,6 +16,7 @@ const SETTING_KEYS = {
   DEEPSEEK_BASE_URL: 'deepseek.base.url',
   DAILY_TEMPLATE: 'report.template.daily',
   WEEKLY_TEMPLATE: 'report.template.weekly',
+  GIT_AUTHOR_EMAIL: 'git.author.email',
 }
 
 interface ApiKey {
@@ -155,6 +156,39 @@ export default function Settings() {
                         {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
+                  </div>
+                  <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
+                    {updateSettingMutation.isPending ? '保存中...' : '保存设置'}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Git 作者配置</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {settingsLoading ? (
+                <div className="text-center py-6 text-muted-foreground">加载中...</div>
+              ) : (
+                <div className="space-y-4 max-w-lg">
+                  <div className="space-y-2">
+                    <Label>Git 作者邮箱</Label>
+                    <Input
+                      value={
+                        settingForm[SETTING_KEYS.GIT_AUTHOR_EMAIL]
+                        || settings?.[SETTING_KEYS.GIT_AUTHOR_EMAIL]
+                        || ''
+                      }
+                      onChange={(e) => setSettingForm({
+                        ...settingForm,
+                        [SETTING_KEYS.GIT_AUTHOR_EMAIL]: e.target.value,
+                      })}
+                      placeholder="your-email@example.com"
+                    />
+                    <p className="text-xs text-muted-foreground">用于日报生成时过滤只属于你的提交记录，留空则获取所有人的提交</p>
                   </div>
                   <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
                     {updateSettingMutation.isPending ? '保存中...' : '保存设置'}

@@ -39,4 +39,33 @@ public interface GitCommitMapper extends BaseMapper<GitCommit> {
     @Select("SELECT * FROM git_commit WHERE committed_at >= #{startTime} " +
             "AND committed_at <= #{endTime} AND deleted_at IS NULL ORDER BY committed_at DESC")
     List<GitCommit> selectAllByTimeRange(LocalDateTime startTime, LocalDateTime endTime);
+
+    /**
+     * 查询指定时间范围内指定作者的提交记录
+     *
+     * @param projectId   项目ID
+     * @param startTime   开始时间
+     * @param endTime     结束时间
+     * @param authorEmail 作者邮箱
+     * @return 提交记录列表
+     */
+    @Select("SELECT * FROM git_commit WHERE project_id = #{projectId} " +
+            "AND committed_at >= #{startTime} AND committed_at <= #{endTime} " +
+            "AND author_email = #{authorEmail} AND deleted_at IS NULL ORDER BY committed_at DESC")
+    List<GitCommit> selectByTimeRangeAndAuthor(Integer projectId, LocalDateTime startTime,
+                                                LocalDateTime endTime, String authorEmail);
+
+    /**
+     * 查询所有项目指定时间范围内指定作者的提交记录
+     *
+     * @param startTime   开始时间
+     * @param endTime     结束时间
+     * @param authorEmail 作者邮箱
+     * @return 提交记录列表
+     */
+    @Select("SELECT * FROM git_commit WHERE committed_at >= #{startTime} " +
+            "AND committed_at <= #{endTime} AND author_email = #{authorEmail} " +
+            "AND deleted_at IS NULL ORDER BY committed_at DESC")
+    List<GitCommit> selectAllByTimeRangeAndAuthor(LocalDateTime startTime, LocalDateTime endTime,
+                                                   String authorEmail);
 }
