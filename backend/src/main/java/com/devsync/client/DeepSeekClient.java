@@ -59,6 +59,8 @@ public class DeepSeekClient {
     public String chat(String systemPrompt, String userPrompt) {
         log.info("[DeepSeek客户端] 调用AI生成，系统提示词长度: {}, 用户提示词长度: {}",
                 systemPrompt.length(), userPrompt.length());
+        log.info("[DeepSeek客户端] 系统提示词全文开始\n{}\n[DeepSeek客户端] 系统提示词全文结束", systemPrompt);
+        log.info("[DeepSeek客户端] 用户提示词全文开始\n{}\n[DeepSeek客户端] 用户提示词全文结束", userPrompt);
 
         String apiKey = getApiKey();
         String baseUrl = getBaseUrl();
