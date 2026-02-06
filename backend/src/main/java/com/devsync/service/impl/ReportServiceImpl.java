@@ -50,6 +50,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -77,6 +79,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     private static final String WEEKLY_TEMPLATE_KEY = "report.template.weekly";
     private static final String GIT_AUTHOR_EMAIL_KEY = "git.author.email";
     private static final String GIT_GITLAB_TOKEN_KEY = "git.gitlab.token";
+    private static final Pattern REQUIREMENT_CODE_PATTERN = Pattern.compile("([A-Za-z]+-\\d+)");
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -151,22 +154,31 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                 : defaultTitle;
 
         String content;
-        boolean hasCommitsPlaceholder = templateContainsCommitsPlaceholder(templateContent);
-        if (useSettingTemplate && hasCommitsPlaceholder) {
-            content = renderTemplate(templateContent, req, commitsText, title);
-        } else {
+        if (reportType == ReportTypeEnum.DAILY) {
+            String templateReference = buildDailyTemplateReference(templateContent);
             try {
-                if (reportType == ReportTypeEnum.DAILY) {
-                    content = deepSeekClient.generateDailyReportByRequirement(commitsText, templateContent);
-                } else {
-                    content = deepSeekClient.generateReport(commitsText, templateContent, req.getType());
-                }
+                content = deepSeekClient.generateDailyReportByRequirement(commitsText, templateReference);
             } catch (Exception e) {
                 log.error("[报告生成] AI生成失败，使用模板内容", e);
                 content = renderTemplate(templateContent, req, commitsText, title);
             }
             if (StrUtil.isBlank(content)) {
                 content = renderTemplate(templateContent, req, commitsText, title);
+            }
+        } else {
+            boolean hasCommitsPlaceholder = templateContainsCommitsPlaceholder(templateContent);
+            if (useSettingTemplate && hasCommitsPlaceholder) {
+                content = renderTemplate(templateContent, req, commitsText, title);
+            } else {
+                try {
+                    content = deepSeekClient.generateReport(commitsText, templateContent, req.getType());
+                } catch (Exception e) {
+                    log.error("[报告生成] AI生成失败，使用模板内容", e);
+                    content = renderTemplate(templateContent, req, commitsText, title);
+                }
+                if (StrUtil.isBlank(content)) {
+                    content = renderTemplate(templateContent, req, commitsText, title);
+                }
             }
         }
 
@@ -244,7 +256,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         }
 
         List<Requirement> codedRequirements = allRequirements.stream()
-                .filter(requirement -> StrUtil.isNotBlank(requirement.getRequirementCode()))
+                .filter(requirement -> StrUtil.isNotBlank(getRequirementCode(requirement)))
                 .toList();
 
         if (codedRequirements.isEmpty()) {
@@ -291,7 +303,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                     ? String.format("状态: %s, 环境: %s", statusText, environmentText)
                     : String.format("状态: %s", statusText);
             sb.append("### ")
-                    .append(requirement.getRequirementCode())
+                    .append(getRequirementCode(requirement))
                     .append("【")
                     .append(projectDisplay)
                     .append("】")
@@ -337,7 +349,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         boolean branchContainsAnyRequirementCode = false;
 
         for (Requirement requirement : requirements) {
-            String requirementCode = StrUtil.blankToDefault(requirement.getRequirementCode(), "").toLowerCase();
+            String requirementCode = StrUtil.blankToDefault(getRequirementCode(requirement), "").toLowerCase();
             if (StrUtil.isNotBlank(requirementCode) && branchName.contains(requirementCode)) {
                 branchContainsAnyRequirementCode = true;
                 return requirement;
@@ -519,6 +531,47 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             return false;
         }
         return template.contains("{{commits}}") || template.contains("{commits}");
+    }
+
+    private String buildDailyTemplateReference(String template) {
+        if (StrUtil.isBlank(template)) {
+            return "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作";
+        }
+
+        String[] lines = template.split("\\n");
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            String trimmed = StrUtil.trim(line);
+            if (StrUtil.isBlank(trimmed)) {
+                continue;
+            }
+            if (trimmed.contains("{{commits}}") || trimmed.contains("{commits}")) {
+                continue;
+            }
+            if (trimmed.startsWith("#") || containsAny(trimmed, "今日工作", "明日计划", "问题与风险")) {
+                sb.append(trimmed).append("\n");
+            }
+        }
+
+        String normalized = sb.toString().trim();
+        if (StrUtil.isBlank(normalized)) {
+            return "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作";
+        }
+        return normalized;
+    }
+
+    private String getRequirementCode(Requirement requirement) {
+        String configuredCode = StrUtil.trimToEmpty(requirement.getRequirementCode());
+        if (StrUtil.isNotBlank(configuredCode)) {
+            return configuredCode.toUpperCase();
+        }
+
+        String requirementName = StrUtil.trimToEmpty(requirement.getName());
+        Matcher matcher = REQUIREMENT_CODE_PATTERN.matcher(requirementName.toUpperCase());
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return "";
     }
 
     @Override
