@@ -27,6 +27,12 @@ public class RequirementRsp {
     @Schema(description = "归属迭代ID")
     private Integer iterationId;
 
+    @Schema(description = "需求状态")
+    private String status;
+
+    @Schema(description = "需求状态描述")
+    private String statusDesc;
+
     @Schema(description = "关联项目ID列表")
     private List<Integer> projectIds;
 

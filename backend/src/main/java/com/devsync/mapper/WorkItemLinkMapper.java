@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.devsync.entity.WorkItemLink;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 /**
  * 工作项关联 Mapper
@@ -30,5 +32,27 @@ public interface WorkItemLinkMapper extends BaseMapper<WorkItemLink> {
      * @return 删除条数
      */
     @Delete("DELETE FROM work_item_link WHERE work_item_id = #{workItemId}")
-    int deleteByWorkItemId(Integer workItemId);
+    int deleteByWorkItemId(@Param("workItemId") Integer workItemId);
+
+    /**
+     * 查询被软删除的关联记录（忽略逻辑删除条件）
+     *
+     * @param workItemId 工作项ID
+     * @param linkType   关联类型
+     * @param linkId     关联ID
+     * @return 关联记录
+     */
+    @Select("SELECT * FROM work_item_link WHERE work_item_id = #{workItemId} AND link_type = #{linkType} AND link_id = #{linkId} ORDER BY id DESC LIMIT 1")
+    WorkItemLink selectOneIncludingDeleted(@Param("workItemId") Integer workItemId,
+                                           @Param("linkType") String linkType,
+                                           @Param("linkId") Integer linkId);
+
+    /**
+     * 恢复被软删除的关联记录（忽略逻辑删除条件）
+     *
+     * @param id 主键ID
+     * @return 更新条数
+     */
+    @Update("UPDATE work_item_link SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = #{id}")
+    int restoreById(@Param("id") Integer id);
 }

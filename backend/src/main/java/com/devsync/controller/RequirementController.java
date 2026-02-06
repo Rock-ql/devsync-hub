@@ -7,6 +7,7 @@ import com.devsync.dto.req.RequirementAddReq;
 import com.devsync.dto.req.RequirementDeleteReq;
 import com.devsync.dto.req.RequirementLinkReq;
 import com.devsync.dto.req.RequirementListReq;
+import com.devsync.dto.req.RequirementStatusUpdateReq;
 import com.devsync.dto.req.RequirementUpdateReq;
 import com.devsync.dto.rsp.RequirementRsp;
 import com.devsync.service.IRequirementService;
@@ -106,6 +107,21 @@ public class RequirementController {
                 return Result.error(businessException.getCode(), businessException.getMessage());
             }
             return Result.error("需求关联失败");
+        }
+    }
+
+    @PostMapping("/status")
+    @Operation(summary = "更新需求状态")
+    public Result<Void> status(@Valid @RequestBody RequirementStatusUpdateReq req) {
+        try {
+            requirementService.updateStatus(req);
+            return Result.success();
+        } catch (Exception e) {
+            log.error("[需求管理] 状态更新失败，参数: {}", JSON.toJSONString(req), e);
+            if (e instanceof BusinessException businessException) {
+                return Result.error(businessException.getCode(), businessException.getMessage());
+            }
+            return Result.error("需求状态更新失败");
         }
     }
 }

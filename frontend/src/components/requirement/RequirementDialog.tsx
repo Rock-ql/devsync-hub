@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 
 interface ProjectOption {
@@ -34,6 +35,19 @@ export default function RequirementDialog({
   const [name, setName] = useState('')
   const [link, setLink] = useState('')
   const [selectedProjectIds, setSelectedProjectIds] = useState<number[]>([])
+  const [status, setStatus] = useState('presented')
+
+  const statusOptions = [
+    { code: 'presented', desc: '已宣讲' },
+    { code: 'pending_dev', desc: '待研发' },
+    { code: 'developing', desc: '开发中' },
+    { code: 'integrating', desc: '联调中' },
+    { code: 'pending_test', desc: '待测试' },
+    { code: 'testing', desc: '测试中' },
+    { code: 'pending_acceptance', desc: '待验收' },
+    { code: 'pending_release', desc: '待上线' },
+    { code: 'released', desc: '已上线' },
+  ]
 
   const isEditing = !!initialData?.id
 
@@ -42,10 +56,29 @@ export default function RequirementDialog({
       setName(initialData?.name || '')
       setLink(initialData?.link || '')
       setSelectedProjectIds(initialData?.projectIds || [])
+      setStatus(initialData?.status || 'presented')
     }
   }, [open, initialData])
 
   const projectOptions = useMemo(() => projects || [], [projects])
+
+  const editableStatusOptions = useMemo(() => {
+    if (!isEditing) {
+      return statusOptions
+    }
+
+    const current = initialData?.status || 'presented'
+    const index = statusOptions.findIndex((item) => item.code === current)
+    if (index < 0) {
+      return statusOptions.slice(0, 1)
+    }
+
+    const candidates: Array<{ code: string; desc: string }> = []
+    if (index - 1 >= 0) candidates.push(statusOptions[index - 1])
+    candidates.push(statusOptions[index])
+    if (index + 1 < statusOptions.length) candidates.push(statusOptions[index + 1])
+    return candidates
+  }, [initialData?.status, isEditing])
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -55,6 +88,7 @@ export default function RequirementDialog({
           name: name.trim(),
           link: link.trim(),
           projectIds: selectedProjectIds,
+          status,
         })
       }
       return requirementApi.add({
@@ -62,6 +96,7 @@ export default function RequirementDialog({
         name: name.trim(),
         link: link.trim(),
         projectIds: selectedProjectIds,
+        status,
       })
     },
     onSuccess: () => {
@@ -127,6 +162,17 @@ export default function RequirementDialog({
                 <p className="text-sm text-muted-foreground">暂无项目可选</p>
               )}
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>需求状态</Label>
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+              {editableStatusOptions.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.desc}
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
         <DialogFooter className="pt-2">

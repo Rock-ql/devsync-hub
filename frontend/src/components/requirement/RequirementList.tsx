@@ -5,6 +5,7 @@ import { requirementApi, RequirementItem } from '@/api/requirement'
 import RequirementDialog from '@/components/requirement/RequirementDialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Select } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 
 interface ProjectOption {
@@ -23,6 +24,18 @@ export default function RequirementList({ iterationId, iterationName, projects }
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<RequirementItem | null>(null)
 
+  const statusOptions = [
+    { code: 'presented', desc: '已宣讲' },
+    { code: 'pending_dev', desc: '待研发' },
+    { code: 'developing', desc: '开发中' },
+    { code: 'integrating', desc: '联调中' },
+    { code: 'pending_test', desc: '待测试' },
+    { code: 'testing', desc: '测试中' },
+    { code: 'pending_acceptance', desc: '待验收' },
+    { code: 'pending_release', desc: '待上线' },
+    { code: 'released', desc: '已上线' },
+  ]
+
   const { data: requirements, isLoading } = useQuery<RequirementItem[]>({
     queryKey: ['requirements', iterationId],
     queryFn: () => requirementApi.list(iterationId),
@@ -36,6 +49,28 @@ export default function RequirementList({ iterationId, iterationName, projects }
     },
     onError: (error: Error) => toast.error(error.message),
   })
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) => requirementApi.updateStatus({ id, status }),
+    onSuccess: () => {
+      toast.success('状态已更新')
+      queryClient.invalidateQueries({ queryKey: ['requirements', iterationId] })
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+
+  const getAdjacentStatuses = (current?: string) => {
+    const normalized = current || 'presented'
+    const index = statusOptions.findIndex((item) => item.code === normalized)
+    if (index < 0) {
+      return statusOptions.slice(0, 1)
+    }
+    const candidates: Array<{ code: string; desc: string }> = []
+    if (index - 1 >= 0) candidates.push(statusOptions[index - 1])
+    candidates.push(statusOptions[index])
+    if (index + 1 < statusOptions.length) candidates.push(statusOptions[index + 1])
+    return candidates
+  }
 
   const handleOpenAdd = () => {
     setEditingItem(null)
@@ -117,8 +152,25 @@ export default function RequirementList({ iterationId, iterationName, projects }
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="soft" tone="neutral">{item.statusDesc || '已宣讲'}</Badge>
                 <Badge variant="soft" tone="info">SQL {item.linkedSqlCount || 0}</Badge>
                 <Badge variant="soft" tone="neutral">提交 {item.linkedCommitCount || 0}</Badge>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-muted-foreground">状态：</span>
+                <Select
+                  value={item.status || 'presented'}
+                  disabled={statusMutation.isPending}
+                  onChange={(e) => statusMutation.mutate({ id: item.id, status: e.target.value })}
+                  className="h-9 max-w-[180px] text-xs"
+                >
+                  {getAdjacentStatuses(item.status).map((status) => (
+                    <option key={status.code} value={status.code}>
+                      {status.desc}
+                    </option>
+                  ))}
+                </Select>
               </div>
             </div>
           ))}

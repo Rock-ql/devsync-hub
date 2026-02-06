@@ -4,6 +4,7 @@ import com.devsync.dto.req.RequirementAddReq;
 import com.devsync.dto.req.RequirementDeleteReq;
 import com.devsync.dto.req.RequirementLinkReq;
 import com.devsync.dto.req.RequirementListReq;
+import com.devsync.dto.req.RequirementStatusUpdateReq;
 import com.devsync.dto.req.RequirementUpdateReq;
 import com.devsync.dto.rsp.RequirementRsp;
 
@@ -52,4 +53,11 @@ public interface IRequirementService {
      * @param req 请求参数
      */
     void linkRequirement(RequirementLinkReq req);
+
+    /**
+     * 更新需求状态
+     *
+     * @param req 请求参数
+     */
+    void updateStatus(RequirementStatusUpdateReq req);
 }

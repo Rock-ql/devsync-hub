@@ -5,6 +5,8 @@ export interface RequirementItem {
   name: string
   link?: string
   iterationId: number
+  status?: string
+  statusDesc?: string
   projectIds: number[]
   projectNames: string[]
   linkedSqlCount: number
@@ -17,6 +19,7 @@ export interface RequirementAddPayload {
   name: string
   link?: string
   projectIds?: number[]
+  status?: string
 }
 
 export interface RequirementUpdatePayload {
@@ -24,6 +27,12 @@ export interface RequirementUpdatePayload {
   name: string
   link?: string
   projectIds?: number[]
+  status?: string
+}
+
+export interface RequirementStatusUpdatePayload {
+  id: number
+  status: string
 }
 
 export interface RequirementLinkPayload {
@@ -37,6 +46,7 @@ export const requirementApi = {
     api.post<RequirementItem[]>('/requirement/list', { iterationId, keyword }),
   add: (payload: RequirementAddPayload) => api.post<number>('/requirement/add', payload),
   update: (payload: RequirementUpdatePayload) => api.post('/requirement/update', payload),
+  updateStatus: (payload: RequirementStatusUpdatePayload) => api.post('/requirement/status', payload),
   remove: (id: number) => api.post('/requirement/delete', { id }),
   link: (payload: RequirementLinkPayload) => api.post('/requirement/link', payload),
 }

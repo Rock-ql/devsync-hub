@@ -13,8 +13,10 @@ import com.devsync.dto.req.IterationListReq;
 import com.devsync.dto.req.IterationUpdateReq;
 import com.devsync.dto.rsp.IterationRsp;
 import com.devsync.entity.Iteration;
+import com.devsync.entity.IterationProject;
 import com.devsync.entity.Project;
 import com.devsync.mapper.IterationMapper;
+import com.devsync.mapper.IterationProjectMapper;
 import com.devsync.mapper.PendingSqlMapper;
 import com.devsync.mapper.ProjectMapper;
 import com.devsync.mapper.RequirementMapper;
@@ -24,7 +26,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +45,7 @@ import java.util.stream.Collectors;
 public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration> implements IIterationService {
 
     private final IterationMapper iterationMapper;
+    private final IterationProjectMapper iterationProjectMapper;
     private final ProjectMapper projectMapper;
     private final PendingSqlMapper pendingSqlMapper;
     private final RequirementMapper requirementMapper;
@@ -48,8 +56,8 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
                 req.getProjectId(), req.getName(), req.getStatus());
 
         LambdaQueryWrapper<Iteration> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(req.getProjectId() != null, Iteration::getProjectId, req.getProjectId())
-                .like(StrUtil.isNotBlank(req.getName()), Iteration::getName, req.getName())
+        appendProjectFilter(wrapper, req.getProjectId());
+        wrapper.like(StrUtil.isNotBlank(req.getName()), Iteration::getName, req.getName())
                 .eq(StrUtil.isNotBlank(req.getStatus()), Iteration::getStatus, req.getStatus())
                 .orderByDesc(Iteration::getCreatedAt);
 
@@ -68,8 +76,8 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
         log.info("[迭代管理] 获取项目的所有迭代，项目ID: {}", projectId);
 
         LambdaQueryWrapper<Iteration> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Iteration::getProjectId, projectId)
-                .orderByDesc(Iteration::getCreatedAt);
+        appendProjectFilter(wrapper, projectId);
+        wrapper.orderByDesc(Iteration::getCreatedAt);
 
         List<Iteration> iterations = iterationMapper.selectList(wrapper);
         return iterations.stream()
@@ -94,16 +102,14 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
     public Integer addIteration(IterationAddReq req) {
         log.info("[迭代管理] 新增迭代，项目ID: {}, 名称: {}", req.getProjectId(), req.getName());
 
-        // 验证项目是否存在（项目ID可选）
-        if (req.getProjectId() != null) {
-            Project project = projectMapper.selectById(req.getProjectId());
-            if (project == null) {
-                throw new BusinessException(404, "指定的项目不存在");
-            }
-        }
+        List<Integer> projectIds = normalizeProjectIds(req.getProjectIds(), req.getProjectId());
+        validateProjectsExist(projectIds);
 
         Iteration iteration = new Iteration();
         BeanUtil.copyProperties(req, iteration);
+
+        // 向后兼容：单项目字段保留，取第一个项目ID
+        iteration.setProjectId(projectIds.isEmpty() ? null : projectIds.get(0));
 
         // 默认状态为规划中
         if (StrUtil.isBlank(iteration.getStatus())) {
@@ -112,6 +118,8 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
 
         iterationMapper.insert(iteration);
         log.info("[迭代管理] 新增迭代成功，ID: {}", iteration.getId());
+
+        syncProjects(iteration.getId(), projectIds);
 
         return iteration.getId();
     }
@@ -147,6 +155,15 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
             iteration.setEndDate(req.getEndDate());
         }
 
+        if (req.getProjectIds() != null || req.getProjectId() != null) {
+            List<Integer> projectIds = normalizeProjectIds(req.getProjectIds(), req.getProjectId());
+            validateProjectsExist(projectIds);
+            syncProjects(req.getId(), projectIds);
+
+            // 向后兼容：同步单项目字段
+            iteration.setProjectId(projectIds.isEmpty() ? null : projectIds.get(0));
+        }
+
         iterationMapper.updateById(iteration);
         log.info("[迭代管理] 更新迭代成功，ID: {}", req.getId());
     }
@@ -162,6 +179,7 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
         }
 
         iterationMapper.deleteById(id);
+        iterationProjectMapper.deleteByIterationId(id);
         log.info("[迭代管理] 删除迭代成功，ID: {}", id);
     }
 
@@ -192,12 +210,15 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
         IterationRsp rsp = new IterationRsp();
         BeanUtil.copyProperties(iteration, rsp);
 
-        // 获取项目名称（项目ID可选）
-        if (iteration.getProjectId() != null) {
-            Project project = projectMapper.selectById(iteration.getProjectId());
-            if (project != null) {
-                rsp.setProjectName(project.getName());
-            }
+        // 获取关联项目（多选）
+        List<Integer> projectIds = loadProjectIds(iteration);
+        rsp.setProjectIds(projectIds);
+
+        List<String> projectNames = loadProjectNames(projectIds);
+        rsp.setProjectNames(projectNames);
+
+        if (!projectNames.isEmpty()) {
+            rsp.setProjectName(String.join(", ", projectNames));
         }
 
         // 获取状态描述
@@ -211,5 +232,104 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
         rsp.setRequirementCount(requirementMapper.countByIterationId(iteration.getId()));
 
         return rsp;
+    }
+
+    /**
+     * 追加项目筛选条件：兼容 iteration.project_id（老数据）与 iteration_project（新数据）
+     */
+    private void appendProjectFilter(LambdaQueryWrapper<Iteration> wrapper, Integer projectId) {
+        if (projectId == null) {
+            return;
+        }
+
+        List<Integer> iterationIds = iterationProjectMapper.selectIterationIdsByProjectId(projectId);
+        wrapper.and(sub -> {
+            sub.eq(Iteration::getProjectId, projectId);
+            if (iterationIds != null && !iterationIds.isEmpty()) {
+                sub.or().in(Iteration::getId, iterationIds);
+            }
+        });
+    }
+
+    private List<Integer> normalizeProjectIds(List<Integer> projectIds, Integer projectId) {
+        if (projectIds != null) {
+            return projectIds.stream()
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+        }
+        if (projectId == null) {
+            return List.of();
+        }
+        return List.of(projectId);
+    }
+
+    private void validateProjectsExist(List<Integer> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            return;
+        }
+
+        List<Project> projects = projectMapper.selectBatchIds(projectIds);
+        Set<Integer> existingIds = projects.stream()
+                .map(Project::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        for (Integer projectId : projectIds) {
+            if (!existingIds.contains(projectId)) {
+                throw new BusinessException(404, "指定的项目不存在");
+            }
+        }
+    }
+
+    private void syncProjects(Integer iterationId, List<Integer> projectIds) {
+        iterationProjectMapper.deleteByIterationId(iterationId);
+        if (projectIds == null || projectIds.isEmpty()) {
+            return;
+        }
+
+        for (Integer projectId : projectIds) {
+            IterationProject relation = new IterationProject();
+            relation.setIterationId(iterationId);
+            relation.setProjectId(projectId);
+            iterationProjectMapper.insert(relation);
+        }
+    }
+
+    private List<Integer> loadProjectIds(Iteration iteration) {
+        LambdaQueryWrapper<IterationProject> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(IterationProject::getIterationId, iteration.getId());
+        List<IterationProject> relations = iterationProjectMapper.selectList(wrapper);
+
+        List<Integer> projectIds = relations.stream()
+                .map(IterationProject::getProjectId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        if (projectIds.isEmpty() && iteration.getProjectId() != null) {
+            return List.of(iteration.getProjectId());
+        }
+
+        return projectIds;
+    }
+
+    private List<String> loadProjectNames(List<Integer> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<Project> projects = projectMapper.selectBatchIds(projectIds);
+        Map<Integer, String> projectNameMap = new HashMap<>();
+        for (Project project : projects) {
+            projectNameMap.put(project.getId(), project.getName());
+        }
+
+        List<String> result = new ArrayList<>();
+        for (Integer projectId : projectIds) {
+            result.add(projectNameMap.getOrDefault(projectId, "未知项目"));
+        }
+
+        return result;
     }
 }

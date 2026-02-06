@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * 迭代更新请求
@@ -27,6 +28,12 @@ public class IterationUpdateReq {
     @Size(max = 1000, message = "迭代描述不能超过1000个字符")
     @Schema(description = "迭代描述")
     private String description;
+
+    @Schema(description = "项目ID（可选，向后兼容）")
+    private Integer projectId;
+
+    @Schema(description = "关联项目ID列表（可选，多选）")
+    private List<Integer> projectIds;
 
     @Schema(description = "状态: planning/developing/testing/released")
     private String status;

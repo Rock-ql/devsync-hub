@@ -5,6 +5,7 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 迭代详情响应
@@ -23,6 +24,12 @@ public class IterationRsp {
 
     @Schema(description = "项目名称")
     private String projectName;
+
+    @Schema(description = "关联项目ID列表")
+    private List<Integer> projectIds;
+
+    @Schema(description = "关联项目名称列表")
+    private List<String> projectNames;
 
     @Schema(description = "迭代名称")
     private String name;

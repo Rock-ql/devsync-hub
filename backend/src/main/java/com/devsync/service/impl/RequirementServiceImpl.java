@@ -4,11 +4,13 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.devsync.common.enums.RequirementStatusEnum;
 import com.devsync.common.exception.BusinessException;
 import com.devsync.dto.req.RequirementAddReq;
 import com.devsync.dto.req.RequirementDeleteReq;
 import com.devsync.dto.req.RequirementLinkReq;
 import com.devsync.dto.req.RequirementListReq;
+import com.devsync.dto.req.RequirementStatusUpdateReq;
 import com.devsync.dto.req.RequirementUpdateReq;
 import com.devsync.dto.rsp.RequirementRsp;
 import com.devsync.entity.Iteration;
@@ -82,6 +84,11 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
             RequirementRsp rsp = new RequirementRsp();
             BeanUtil.copyProperties(requirement, rsp);
 
+            RequirementStatusEnum statusEnum = RequirementStatusEnum.getByCode(requirement.getStatus());
+            if (statusEnum != null) {
+                rsp.setStatusDesc(statusEnum.getDesc());
+            }
+
             List<Integer> projectIds = requirementProjects.getOrDefault(requirement.getId(), List.of());
             List<Integer> uniqueProjectIds = projectIds.stream().distinct().toList();
             rsp.setProjectIds(uniqueProjectIds);
@@ -113,6 +120,13 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
         requirement.setName(req.getName());
         requirement.setLink(StrUtil.blankToDefault(req.getLink(), ""));
 
+        String status = StrUtil.blankToDefault(req.getStatus(), RequirementStatusEnum.PRESENTED.getCode());
+        RequirementStatusEnum statusEnum = RequirementStatusEnum.getByCode(status);
+        if (statusEnum == null) {
+            throw new BusinessException(400, "无效的需求状态");
+        }
+        requirement.setStatus(statusEnum.getCode());
+
         requirementMapper.insert(requirement);
         syncProjects(requirement.getId(), req.getProjectIds());
 
@@ -131,9 +145,47 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
 
         requirement.setName(req.getName());
         requirement.setLink(StrUtil.blankToDefault(req.getLink(), ""));
+
+        if (StrUtil.isNotBlank(req.getStatus())) {
+            RequirementStatusEnum targetStatus = RequirementStatusEnum.getByCode(req.getStatus());
+            if (targetStatus == null) {
+                throw new BusinessException(400, "无效的需求状态");
+            }
+
+            String currentStatus = StrUtil.blankToDefault(requirement.getStatus(), RequirementStatusEnum.PRESENTED.getCode());
+            if (!RequirementStatusEnum.canTransfer(currentStatus, targetStatus.getCode())) {
+                throw new BusinessException(400, "需求状态流转不合法");
+            }
+
+            requirement.setStatus(targetStatus.getCode());
+        }
         requirementMapper.updateById(requirement);
 
         syncProjects(req.getId(), req.getProjectIds());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateStatus(RequirementStatusUpdateReq req) {
+        log.info("[需求管理] 更新需求状态，id={}, status={}", req.getId(), req.getStatus());
+
+        Requirement requirement = requirementMapper.selectById(req.getId());
+        if (requirement == null) {
+            throw new BusinessException(404, "需求不存在");
+        }
+
+        RequirementStatusEnum targetStatus = RequirementStatusEnum.getByCode(req.getStatus());
+        if (targetStatus == null) {
+            throw new BusinessException(400, "无效的需求状态");
+        }
+
+        String currentStatus = StrUtil.blankToDefault(requirement.getStatus(), RequirementStatusEnum.PRESENTED.getCode());
+        if (!RequirementStatusEnum.canTransfer(currentStatus, targetStatus.getCode())) {
+            throw new BusinessException(400, "需求状态流转不合法");
+        }
+
+        requirement.setStatus(targetStatus.getCode());
+        requirementMapper.updateById(requirement);
     }
 
     @Override
@@ -172,13 +224,26 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
                 .eq(WorkItemLink::getLinkType, linkType)
                 .eq(WorkItemLink::getLinkId, req.getLinkId());
 
-        if (workItemLinkMapper.selectCount(wrapper) == 0) {
-            WorkItemLink link = new WorkItemLink();
-            link.setWorkItemId(req.getRequirementId());
-            link.setLinkType(linkType);
-            link.setLinkId(req.getLinkId());
-            workItemLinkMapper.insert(link);
+        if (workItemLinkMapper.selectCount(wrapper) > 0) {
+            return;
         }
+
+        // 兼容：如果存在已软删除记录，则优先恢复，避免唯一约束冲突
+        WorkItemLink deletedLink = workItemLinkMapper.selectOneIncludingDeleted(
+                req.getRequirementId(),
+                linkType,
+                req.getLinkId()
+        );
+        if (deletedLink != null && deletedLink.getDeletedAt() != null) {
+            workItemLinkMapper.restoreById(deletedLink.getId());
+            return;
+        }
+
+        WorkItemLink link = new WorkItemLink();
+        link.setWorkItemId(req.getRequirementId());
+        link.setLinkType(linkType);
+        link.setLinkId(req.getLinkId());
+        workItemLinkMapper.insert(link);
     }
 
     private void syncProjects(Integer requirementId, List<Integer> projectIds) {

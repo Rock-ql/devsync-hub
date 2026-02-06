@@ -19,6 +19,9 @@ public interface IterationMapper extends BaseMapper<Iteration> {
      * @param projectId 项目ID
      * @return 迭代数量
      */
-    @Select("SELECT COUNT(*) FROM iteration WHERE project_id = #{projectId} AND deleted_at IS NULL")
+    @Select("SELECT COUNT(DISTINCT i.id) " +
+            "FROM iteration i " +
+            "LEFT JOIN iteration_project ip ON ip.iteration_id = i.id AND ip.deleted_at IS NULL " +
+            "WHERE i.deleted_at IS NULL AND (i.project_id = #{projectId} OR ip.project_id = #{projectId})")
     Integer countByProjectId(Integer projectId);
 }

@@ -5,34 +5,25 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 需求实体
+ * 迭代-项目关联实体
  *
  * @author xiaolei
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("requirement")
-public class Requirement extends BaseEntity {
+@TableName("iteration_project")
+public class IterationProject extends BaseEntity {
 
     private static final long serialVersionUID = 1L;
 
     /**
-     * 归属迭代ID
+     * 迭代ID
      */
     private Integer iterationId;
 
     /**
-     * 需求名称
+     * 项目ID
      */
-    private String name;
-
-    /**
-     * 需求链接
-     */
-    private String link;
-
-    /**
-     * 需求状态
-     */
-    private String status;
+    private Integer projectId;
 }
+

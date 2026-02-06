@@ -273,14 +273,43 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
 
     @Override
     public List<GitLabBranchRsp> listGitlabBranches(GitLabBranchReq req) {
-        log.info("[项目管理] 获取GitLab分支列表，URL: {}, 项目ID: {}", req.getGitlabUrl(), req.getGitlabProjectId());
+        log.info("[项目管理] 获取GitLab分支列表，URL: {}, 项目ID: {}, DevSync项目ID: {}",
+                req.getGitlabUrl(), req.getGitlabProjectId(), req.getId());
+
+        String gitlabUrl = req.getGitlabUrl();
+        String gitlabToken = req.getGitlabToken();
+        Integer gitlabProjectId = req.getGitlabProjectId();
+
+        // 编辑模式：前端未传 Token 但传了项目 ID，从数据库获取已存储的 Token
+        if (StrUtil.isBlank(gitlabToken) && req.getId() != null) {
+            Project project = projectMapper.selectById(req.getId());
+            if (project == null) {
+                throw new BusinessException(404, "项目不存在");
+            }
+            if (StrUtil.isBlank(project.getGitlabToken())) {
+                throw new BusinessException(400, "该项目未配置 GitLab Token");
+            }
+            gitlabToken = encryptUtil.decrypt(project.getGitlabToken());
+            // 如果前端也未传 URL 或 GitLab 项目ID，从数据库补充
+            if (StrUtil.isBlank(gitlabUrl)) {
+                gitlabUrl = project.getGitlabUrl();
+            }
+            if (gitlabProjectId == null) {
+                gitlabProjectId = project.getGitlabProjectId();
+            }
+        }
+
+        // 最终校验：URL 和 Token 必须都有值
+        if (StrUtil.isBlank(gitlabUrl)) {
+            throw new BusinessException(400, "GitLab 仓库地址不能为空");
+        }
+        if (StrUtil.isBlank(gitlabToken)) {
+            throw new BusinessException(400, "GitLab Token 不能为空，请输入 Token 或指定已配置的项目");
+        }
 
         try {
             List<GitLabClient.BranchInfo> branches = gitLabClient.listBranches(
-                    req.getGitlabUrl(),
-                    req.getGitlabToken(),
-                    req.getGitlabProjectId()
-            );
+                    gitlabUrl, gitlabToken, gitlabProjectId);
 
             return branches.stream()
                     .map(info -> {
@@ -291,12 +320,8 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
                     })
                     .collect(Collectors.toList());
         } catch (Exception e) {
-            GitLabBranchReq logReq = new GitLabBranchReq();
-            logReq.setGitlabUrl(req.getGitlabUrl());
-            logReq.setGitlabProjectId(req.getGitlabProjectId());
-            logReq.setGitlabToken(maskToken(req.getGitlabToken()));
-            log.error("[项目管理] 获取GitLab分支失败，参数: {}",
-                    JSON.toJSONString(logReq), e);
+            log.error("[项目管理] 获取GitLab分支失败，URL: {}, gitlabProjectId: {}, devSyncProjectId: {}",
+                    gitlabUrl, gitlabProjectId, req.getId(), e);
             throw e;
         }
     }

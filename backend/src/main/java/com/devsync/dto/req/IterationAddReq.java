@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * 迭代新增请求
@@ -19,6 +20,9 @@ public class IterationAddReq {
 
     @Schema(description = "项目ID（可选）")
     private Integer projectId;
+
+    @Schema(description = "关联项目ID列表（可选，多选）")
+    private List<Integer> projectIds;
 
     @NotBlank(message = "迭代名称不能为空")
     @Size(max = 100, message = "迭代名称不能超过100个字符")

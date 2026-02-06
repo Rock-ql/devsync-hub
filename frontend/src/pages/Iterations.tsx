@@ -17,6 +17,8 @@ interface Iteration {
   id: number
   projectId: number | null
   projectName: string | null
+  projectIds?: number[]
+  projectNames?: string[]
   name: string
   description: string
   status: string
@@ -52,7 +54,7 @@ export default function Iterations() {
   const [editingIteration, setEditingIteration] = useState<Iteration | null>(null)
   const [expandedIterations, setExpandedIterations] = useState<number[]>([])
   const [formData, setFormData] = useState({
-    projectId: '',
+    projectIds: [] as number[],
     name: '',
     description: '',
     status: 'planning',
@@ -72,7 +74,7 @@ export default function Iterations() {
 
   const addMutation = useMutation({
     mutationFn: (data: typeof formData) =>
-      api.post('/iteration/add', { ...data, projectId: data.projectId ? parseInt(data.projectId) : null }),
+      api.post('/iteration/add', { ...data }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['iterations'] })
       setIsModalOpen(false)
@@ -106,7 +108,7 @@ export default function Iterations() {
 
   const resetForm = () => {
     setFormData({
-      projectId: '',
+      projectIds: [],
       name: '',
       description: '',
       status: 'planning',
@@ -119,7 +121,7 @@ export default function Iterations() {
   const handleEdit = (iteration: Iteration) => {
     setEditingIteration(iteration)
     setFormData({
-      projectId: iteration.projectId?.toString() || '',
+      projectIds: iteration.projectIds || (iteration.projectId ? [iteration.projectId] : []),
       name: iteration.name,
       description: iteration.description || '',
       status: iteration.status,
@@ -127,6 +129,19 @@ export default function Iterations() {
       endDate: iteration.endDate || '',
     })
     setIsModalOpen(true)
+  }
+
+  const displayIterationProjects = (iteration: Iteration) => {
+    const names = iteration.projectNames?.length
+      ? iteration.projectNames
+      : iteration.projectName
+        ? [iteration.projectName]
+        : []
+
+    if (!names.length) return '未关联项目'
+    const visible = names.slice(0, 3)
+    const extra = names.length - visible.length
+    return extra > 0 ? `${visible.join(', ')} +${extra}` : visible.join(', ')
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -198,7 +213,7 @@ export default function Iterations() {
                           {iteration.name}
                         </td>
                         <td className="px-6 py-4 text-sm text-muted-foreground">
-                          {iteration.projectName || '未关联项目'}
+                          {displayIterationProjects(iteration)}
                         </td>
                         <td className="px-6 py-4">
                           <Select
@@ -299,7 +314,7 @@ export default function Iterations() {
             <Card key={iteration.id}>
               <CardHeader className="space-y-2">
                 <CardTitle className="text-base">{iteration.name}</CardTitle>
-                <p className="text-sm text-muted-foreground">{iteration.projectName || '未关联项目'}</p>
+                <p className="text-sm text-muted-foreground">{displayIterationProjects(iteration)}</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap gap-2">
@@ -397,18 +412,31 @@ export default function Iterations() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label>所属项目</Label>
-              <Select
-                value={formData.projectId}
-                onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
-                disabled={!!editingIteration}
-              >
-                <option value="">不关联项目</option>
-                {projects?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {projects?.length ? projects.map((project) => (
+                  <label
+                    key={project.id}
+                    className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-sm text-muted-foreground"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={formData.projectIds.includes(project.id)}
+                      onChange={() => {
+                        setFormData((prev) => {
+                          if (prev.projectIds.includes(project.id)) {
+                            return { ...prev, projectIds: prev.projectIds.filter((id) => id !== project.id) }
+                          }
+                          return { ...prev, projectIds: [...prev.projectIds, project.id] }
+                        })
+                      }}
+                      className="h-4 w-4 accent-[hsl(var(--accent))]"
+                    />
+                    <span className="text-foreground">{project.name}</span>
+                  </label>
+                )) : (
+                  <p className="text-sm text-muted-foreground">暂无项目可选</p>
+                )}
+              </div>
             </div>
             <div className="space-y-2">
               <Label>迭代名称 *</Label>

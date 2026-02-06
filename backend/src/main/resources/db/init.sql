@@ -48,6 +48,23 @@ COMMENT ON COLUMN iteration.project_id IS '关联项目ID（可选）';
 COMMENT ON COLUMN iteration.name IS '迭代名称';
 COMMENT ON COLUMN iteration.status IS '状态: planning/developing/testing/released';
 
+-- 2.1 迭代-项目关联表
+CREATE TABLE IF NOT EXISTS iteration_project (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL DEFAULT 1,
+    iteration_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    state INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP DEFAULT NULL,
+    UNIQUE(iteration_id, project_id)
+);
+
+COMMENT ON TABLE iteration_project IS '迭代-项目关联表';
+COMMENT ON COLUMN iteration_project.iteration_id IS '迭代ID';
+COMMENT ON COLUMN iteration_project.project_id IS '项目ID';
+
 -- 3. 待执行SQL表
 CREATE TABLE IF NOT EXISTS pending_sql (
     id SERIAL PRIMARY KEY,
@@ -217,16 +234,22 @@ CREATE TABLE IF NOT EXISTS requirement (
     iteration_id INTEGER NOT NULL,
     name VARCHAR(500) NOT NULL,
     link VARCHAR(1000) DEFAULT '',
+    status VARCHAR(30) NOT NULL DEFAULT 'presented',
     state INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP DEFAULT NULL
 );
 
+-- 兼容旧库：CREATE TABLE IF NOT EXISTS 不会自动补字段
+ALTER TABLE requirement
+    ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'presented';
+
 COMMENT ON TABLE requirement IS '需求表';
 COMMENT ON COLUMN requirement.iteration_id IS '归属迭代ID（必填）';
 COMMENT ON COLUMN requirement.name IS '需求名称';
 COMMENT ON COLUMN requirement.link IS '需求链接URL';
+COMMENT ON COLUMN requirement.status IS '需求状态';
 
 -- 12. 需求-项目关联表
 CREATE TABLE IF NOT EXISTS requirement_project (
@@ -253,11 +276,18 @@ CREATE TABLE IF NOT EXISTS work_item_link (
     state INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMP DEFAULT NULL,
-    UNIQUE(work_item_id, link_type, link_id)
+    deleted_at TIMESTAMP DEFAULT NULL
 );
 
 COMMENT ON TABLE work_item_link IS '工作项关联表';
+
+-- work_item_link：部分唯一索引（仅对未删除记录生效），避免软删除后唯一约束冲突
+ALTER TABLE work_item_link
+    DROP CONSTRAINT IF EXISTS work_item_link_work_item_id_link_type_link_id_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_work_item_link_active
+ON work_item_link(work_item_id, link_type, link_id)
+WHERE deleted_at IS NULL;
 
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_project_user_id ON project(user_id);

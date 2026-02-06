@@ -120,13 +120,17 @@ export default function Projects() {
     enabled: !!selectedProject && isDetailOpen && activeTab === 'sql',
   })
 
-  const canFetchBranches = Boolean(formData.gitlabUrl && formData.gitlabToken)
+  // 新建模式：需要 URL + Token；编辑模式：有 URL + 项目 ID 即可（后端用存储的 Token）
+  const canFetchBranches = Boolean(
+    formData.gitlabUrl && (formData.gitlabToken || editingProject?.id),
+  )
 
   // 防抖：延迟触发分支查询，避免每次按键都请求
   const [debouncedBranchParams, setDebouncedBranchParams] = useState({
     gitlabUrl: '',
     gitlabToken: '',
     gitlabProjectId: '',
+    id: undefined as number | undefined,
   })
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout>>()
 
@@ -139,6 +143,7 @@ export default function Projects() {
         gitlabUrl: formData.gitlabUrl,
         gitlabToken: formData.gitlabToken,
         gitlabProjectId: formData.gitlabProjectId,
+        id: editingProject?.id,
       })
     }, 500)
     return () => {
@@ -146,12 +151,14 @@ export default function Projects() {
         clearTimeout(debounceTimerRef.current)
       }
     }
-  }, [formData.gitlabUrl, formData.gitlabToken, formData.gitlabProjectId])
+  }, [formData.gitlabUrl, formData.gitlabToken, formData.gitlabProjectId, editingProject?.id])
 
-  const canFetchDebouncedBranches = Boolean(debouncedBranchParams.gitlabUrl && debouncedBranchParams.gitlabToken)
+  const canFetchDebouncedBranches = Boolean(
+    debouncedBranchParams.gitlabUrl && (debouncedBranchParams.gitlabToken || debouncedBranchParams.id),
+  )
 
   const branchQuery = useQuery<GitLabBranch[]>({
-    queryKey: ['gitlab-branches', debouncedBranchParams.gitlabUrl, debouncedBranchParams.gitlabToken, debouncedBranchParams.gitlabProjectId],
+    queryKey: ['gitlab-branches', debouncedBranchParams.gitlabUrl, debouncedBranchParams.gitlabToken, debouncedBranchParams.gitlabProjectId, debouncedBranchParams.id],
     queryFn: () => {
       const projectId = debouncedBranchParams.gitlabProjectId?.toString().trim()
       const numericProjectId = projectId ? Number(projectId) : Number.NaN
@@ -160,8 +167,9 @@ export default function Projects() {
         : undefined
       return api.post('/project/branches', {
         gitlabUrl: debouncedBranchParams.gitlabUrl,
-        gitlabToken: debouncedBranchParams.gitlabToken,
+        gitlabToken: debouncedBranchParams.gitlabToken || undefined,
         gitlabProjectId: safeProjectId,
+        id: debouncedBranchParams.id,
       })
     },
     enabled: canFetchDebouncedBranches,
@@ -508,7 +516,7 @@ export default function Projects() {
                 )}
                 {!canFetchBranches && (
                   <p className="text-xs text-muted-foreground">
-                    填写 GitLab 地址与 Token 后可动态获取分支
+                    {editingProject ? '填写 GitLab 地址后可动态获取分支' : '填写 GitLab 地址与 Token 后可动态获取分支'}
                   </p>
                 )}
                 {branchQuery.isError && (

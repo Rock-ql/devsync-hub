@@ -32,4 +32,7 @@ public class RequirementUpdateReq {
 
     @Schema(description = "关联项目ID列表")
     private List<Integer> projectIds;
+
+    @Schema(description = "需求状态")
+    private String status;
 }
