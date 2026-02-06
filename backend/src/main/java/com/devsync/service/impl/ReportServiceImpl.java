@@ -661,9 +661,8 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
                 for (GitCommit commit : commits) {
                     commit.setProjectId(project.getId());
-                    try {
-                        gitCommitMapper.insert(commit);
-                    } catch (Exception e) {
+                    int affected = gitCommitMapper.insertIgnoreConflict(commit);
+                    if (affected == 0) {
                         log.debug("[报告生成] 提交记录已存在，跳过: {}", commit.getCommitId());
                     }
                 }

@@ -2,6 +2,7 @@ package com.devsync.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.devsync.entity.GitCommit;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
@@ -15,6 +16,18 @@ import java.util.List;
  */
 @Mapper
 public interface GitCommitMapper extends BaseMapper<GitCommit> {
+
+    /**
+     * 插入提交记录，若已存在则忽略（避免唯一索引冲突导致事务中断）
+     *
+     * @param commit 提交记录
+     * @return 影响行数（1=新增，0=已存在）
+     */
+    @Insert("INSERT INTO git_commit (project_id, commit_id, message, author_name, author_email, committed_at, additions, deletions, branch) " +
+            "VALUES (#{projectId}, #{commitId}, #{message}, COALESCE(#{authorName}, ''), COALESCE(#{authorEmail}, ''), " +
+            "#{committedAt}, COALESCE(#{additions}, 0), COALESCE(#{deletions}, 0), COALESCE(#{branch}, '')) " +
+            "ON CONFLICT (project_id, commit_id) DO NOTHING")
+    int insertIgnoreConflict(GitCommit commit);
 
     /**
      * 查询指定时间范围内的提交记录

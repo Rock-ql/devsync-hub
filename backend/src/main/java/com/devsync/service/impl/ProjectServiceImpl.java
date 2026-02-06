@@ -240,10 +240,10 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         for (GitCommit commit : commits) {
             commit.setProjectId(id);
             // 使用 ON CONFLICT 处理重复记录
-            try {
-                gitCommitMapper.insert(commit);
+            int affected = gitCommitMapper.insertIgnoreConflict(commit);
+            if (affected == 1) {
                 count++;
-            } catch (Exception e) {
+            } else {
                 log.debug("[项目管理] 提交记录已存在，跳过: {}", commit.getCommitId());
             }
         }
