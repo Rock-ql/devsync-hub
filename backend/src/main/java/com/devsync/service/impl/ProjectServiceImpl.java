@@ -117,9 +117,20 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             project.setGitlabToken(encryptUtil.encrypt(req.getGitlabToken()));
         }
 
-        // 设置默认分支
-        if (StrUtil.isBlank(project.getGitlabBranch())) {
-            project.setGitlabBranch("main");
+        // 如果未指定分支且配置了GitLab信息，尝试从远程获取默认分支
+        if (StrUtil.isBlank(project.getGitlabBranch())
+                && StrUtil.isNotBlank(req.getGitlabUrl())
+                && StrUtil.isNotBlank(req.getGitlabToken())) {
+            try {
+                List<GitLabClient.BranchInfo> branches = gitLabClient.listBranches(
+                        req.getGitlabUrl(), req.getGitlabToken(), req.getGitlabProjectId());
+                branches.stream()
+                        .filter(GitLabClient.BranchInfo::isDefaultBranch)
+                        .findFirst()
+                        .ifPresent(info -> project.setGitlabBranch(info.getName()));
+            } catch (Exception e) {
+                log.warn("[项目管理] 自动获取默认分支失败，URL: {}，将保留空值", req.getGitlabUrl(), e);
+            }
         }
 
         projectMapper.insert(project);
@@ -265,16 +276,17 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         log.info("[项目管理] 获取GitLab分支列表，URL: {}, 项目ID: {}", req.getGitlabUrl(), req.getGitlabProjectId());
 
         try {
-            List<String> branches = gitLabClient.listBranches(
+            List<GitLabClient.BranchInfo> branches = gitLabClient.listBranches(
                     req.getGitlabUrl(),
                     req.getGitlabToken(),
                     req.getGitlabProjectId()
             );
 
             return branches.stream()
-                    .map(name -> {
+                    .map(info -> {
                         GitLabBranchRsp rsp = new GitLabBranchRsp();
-                        rsp.setName(name);
+                        rsp.setName(info.getName());
+                        rsp.setDefaultBranch(info.isDefaultBranch());
                         return rsp;
                     })
                     .collect(Collectors.toList());

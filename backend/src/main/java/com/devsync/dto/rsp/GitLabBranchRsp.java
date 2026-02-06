@@ -14,4 +14,7 @@ public class GitLabBranchRsp {
 
     @Schema(description = "分支名称")
     private String name;
+
+    @Schema(description = "是否为默认分支")
+    private Boolean defaultBranch;
 }

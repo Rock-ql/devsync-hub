@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api, { PageResult } from '@/api'
 import { Plus, Pencil, Trash2, GitBranch, ArrowLeft } from 'lucide-react'
@@ -41,6 +41,7 @@ interface GitCommitRecord {
 
 interface GitLabBranch {
   name: string
+  defaultBranch?: boolean
 }
 
 interface IterationSummary {
@@ -85,7 +86,7 @@ export default function Projects() {
     gitlabUrl: '',
     gitlabToken: '',
     gitlabProjectId: '',
-    gitlabBranch: 'main',
+    gitlabBranch: '',
   })
 
   const { data, isLoading } = useQuery<PageResult<Project>>({
@@ -121,22 +122,70 @@ export default function Projects() {
 
   const canFetchBranches = Boolean(formData.gitlabUrl && formData.gitlabToken)
 
+  // 防抖：延迟触发分支查询，避免每次按键都请求
+  const [debouncedBranchParams, setDebouncedBranchParams] = useState({
+    gitlabUrl: '',
+    gitlabToken: '',
+    gitlabProjectId: '',
+  })
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout>>()
+
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      setDebouncedBranchParams({
+        gitlabUrl: formData.gitlabUrl,
+        gitlabToken: formData.gitlabToken,
+        gitlabProjectId: formData.gitlabProjectId,
+      })
+    }, 500)
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+    }
+  }, [formData.gitlabUrl, formData.gitlabToken, formData.gitlabProjectId])
+
+  const canFetchDebouncedBranches = Boolean(debouncedBranchParams.gitlabUrl && debouncedBranchParams.gitlabToken)
+
   const branchQuery = useQuery<GitLabBranch[]>({
-    queryKey: ['gitlab-branches', formData.gitlabUrl, formData.gitlabToken, formData.gitlabProjectId],
+    queryKey: ['gitlab-branches', debouncedBranchParams.gitlabUrl, debouncedBranchParams.gitlabToken, debouncedBranchParams.gitlabProjectId],
     queryFn: () => {
-      const projectId = formData.gitlabProjectId?.toString().trim()
+      const projectId = debouncedBranchParams.gitlabProjectId?.toString().trim()
       const numericProjectId = projectId ? Number(projectId) : Number.NaN
       const safeProjectId = Number.isFinite(numericProjectId) && numericProjectId > 0
         ? numericProjectId
         : undefined
       return api.post('/project/branches', {
-        gitlabUrl: formData.gitlabUrl,
-        gitlabToken: formData.gitlabToken,
+        gitlabUrl: debouncedBranchParams.gitlabUrl,
+        gitlabToken: debouncedBranchParams.gitlabToken,
         gitlabProjectId: safeProjectId,
       })
     },
-    enabled: canFetchBranches,
+    enabled: canFetchDebouncedBranches,
   })
+
+  // 当分支列表加载完成后，自动选中默认分支
+  useEffect(() => {
+    const branches = branchQuery.data
+    if (!branches || branches.length === 0) {
+      return
+    }
+    const currentBranch = formData.gitlabBranch
+    const branchNames = branches.map((b) => b.name)
+    // 如果当前值为空，或当前值不在远程分支列表中，自动选中默认分支
+    if (!currentBranch || !branchNames.includes(currentBranch)) {
+      const defaultBranch = branches.find((b) => b.defaultBranch)
+      if (defaultBranch) {
+        setFormData((prev) => ({ ...prev, gitlabBranch: defaultBranch.name }))
+      } else {
+        // 没有标记默认分支时，选第一个
+        setFormData((prev) => ({ ...prev, gitlabBranch: branches[0].name }))
+      }
+    }
+  }, [branchQuery.data])
 
   const branchOptions = useMemo(() => {
     const options: string[] = []
@@ -154,8 +203,8 @@ export default function Projects() {
     if (canFetchBranches) {
       branchQuery.data?.forEach((item) => pushUnique(item.name))
     }
+    // 保留当前已选中的值
     pushUnique(formData.gitlabBranch)
-    pushUnique('main')
     return options
   }, [branchQuery.data, formData.gitlabBranch, canFetchBranches])
 
@@ -198,7 +247,7 @@ export default function Projects() {
       gitlabUrl: '',
       gitlabToken: '',
       gitlabProjectId: '',
-      gitlabBranch: 'main',
+      gitlabBranch: '',
     })
     setEditingProject(null)
   }
@@ -211,7 +260,7 @@ export default function Projects() {
       gitlabUrl: project.gitlabUrl || '',
       gitlabToken: '',
       gitlabProjectId: project.gitlabProjectId?.toString() || '',
-      gitlabBranch: project.gitlabBranch || 'main',
+      gitlabBranch: project.gitlabBranch || '',
     })
     setIsModalOpen(true)
   }
@@ -445,6 +494,9 @@ export default function Projects() {
                   onChange={(e) => setFormData({ ...formData, gitlabBranch: e.target.value })}
                   disabled={branchQuery.isFetching}
                 >
+                  {branchOptions.length === 0 && (
+                    <option value="">请选择分支</option>
+                  )}
                   {branchOptions.map((branch) => (
                     <option key={branch} value={branch}>
                       {branch}

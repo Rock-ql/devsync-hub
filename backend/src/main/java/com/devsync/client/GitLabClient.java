@@ -31,6 +31,18 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class GitLabClient {
 
+    private static final String USER_AGENT = "DevSync-Hub";
+
+    /**
+     * 分支信息（包含名称和是否为默认分支）
+     */
+    @lombok.Data
+    @lombok.AllArgsConstructor
+    public static class BranchInfo {
+        private String name;
+        private boolean defaultBranch;
+    }
+
     private final OkHttpClient httpClient;
 
     public GitLabClient() {
@@ -47,52 +59,30 @@ public class GitLabClient {
      * @param gitlabUrl   GitLab仓库地址
      * @param token       Access Token
      * @param projectId   项目ID（可选）
-     * @return 分支名称列表
+     * @return 分支信息列表（包含名称和是否为默认分支）
      */
-    public List<String> listBranches(String gitlabUrl, String token, Integer projectId) {
+    public List<BranchInfo> listBranches(String gitlabUrl, String token, Integer projectId) {
         log.info("[GitLab客户端] 获取分支列表，URL: {}, 项目ID: {}", gitlabUrl, projectId);
 
         String apiBaseUrl = parseApiBaseUrl(gitlabUrl);
+
         String projectIdentifier = resolveProjectIdentifier(gitlabUrl, projectId);
         if (StrUtil.isBlank(projectIdentifier)) {
             throw new BusinessException(400, "GitLab仓库地址格式不正确");
         }
 
-        String apiUrl = String.format("%s/api/v4/projects/%s/repository/branches?per_page=100",
-                apiBaseUrl, projectIdentifier);
-
-        log.info("[GitLab客户端] 请求URL: {}", apiUrl);
-
-        Request request = new Request.Builder()
-                .url(apiUrl)
-                .header("PRIVATE-TOKEN", token)
-                .get()
-                .build();
-
-        try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                String errorBody = response.body() != null ? response.body().string() : "无响应内容";
-                log.error("[GitLab客户端] 分支请求失败，状态码: {}, 响应: {}", response.code(), errorBody);
-                throw new BusinessException(500, "GitLab API请求失败: " + response.code());
-            }
-
-            String responseBody = response.body() != null ? response.body().string() : "[]";
-            JSONArray branches = JSON.parseArray(responseBody);
-
-            List<String> result = new ArrayList<>();
-            for (int i = 0; i < branches.size(); i++) {
-                JSONObject branch = branches.getJSONObject(i);
-                String name = branch.getString("name");
-                if (StrUtil.isNotBlank(name)) {
-                    result.add(name);
+        try {
+            return doListBranches(apiBaseUrl, projectIdentifier, token);
+        } catch (BusinessException e) {
+            // 容错：如果用户配置了 projectId，但填写错误，403/404 时尝试使用仓库路径重试
+            if (shouldRetryWithProjectPath(e, projectId)) {
+                String projectPathIdentifier = resolveProjectIdentifier(gitlabUrl, null);
+                if (StrUtil.isNotBlank(projectPathIdentifier) && !projectPathIdentifier.equals(projectIdentifier)) {
+                    log.warn("[GitLab客户端] 获取分支列表失败，尝试使用仓库路径重试，projectId={}", projectId);
+                    return doListBranches(apiBaseUrl, projectPathIdentifier, token);
                 }
             }
-
-            log.info("[GitLab客户端] 获取分支列表成功，数量: {}", result.size());
-            return result;
-        } catch (IOException e) {
-            log.error("[GitLab客户端] 分支请求异常，URL: {}", apiUrl, e);
-            throw new BusinessException(500, "GitLab API请求异常: " + e.getMessage());
+            throw e;
         }
     }
 
@@ -115,59 +105,19 @@ public class GitLabClient {
         if (StrUtil.isBlank(projectIdentifier)) {
             throw new BusinessException(400, "GitLab仓库地址格式不正确");
         }
-        String encodedBranch = URLEncoder.encode(branch, StandardCharsets.UTF_8);
 
-        // 构建API请求URL
-        String apiUrl = String.format("%s/api/v4/projects/%s/repository/commits?ref_name=%s&per_page=100",
-                apiBaseUrl, projectIdentifier, encodedBranch);
-
-        log.info("[GitLab客户端] 请求URL: {}", apiUrl);
-
-        Request request = new Request.Builder()
-                .url(apiUrl)
-                .header("PRIVATE-TOKEN", token)
-                .get()
-                .build();
-
-        try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                String errorBody = response.body() != null ? response.body().string() : "无响应内容";
-                log.error("[GitLab客户端] 请求失败，状态码: {}, 响应: {}", response.code(), errorBody);
-                throw new BusinessException(500, "GitLab API请求失败: " + response.code());
-            }
-
-            String responseBody = response.body() != null ? response.body().string() : "[]";
-            log.info("[GitLab客户端] 响应内容: {}", responseBody.length() > 500 ? responseBody.substring(0, 500) + "..." : responseBody);
-            JSONArray commits = JSON.parseArray(responseBody);
-
-            List<GitCommit> result = new ArrayList<>();
-            for (int i = 0; i < commits.size(); i++) {
-                JSONObject commit = commits.getJSONObject(i);
-                GitCommit gitCommit = new GitCommit();
-                gitCommit.setCommitId(commit.getString("id"));
-                gitCommit.setMessage(commit.getString("title"));
-                gitCommit.setAuthorName(commit.getString("author_name"));
-                gitCommit.setAuthorEmail(commit.getString("author_email"));
-
-                // 解析提交时间
-                String committedDate = commit.getString("committed_date");
-                if (StrUtil.isNotBlank(committedDate)) {
-                    gitCommit.setCommittedAt(parseDateTime(committedDate));
+        try {
+            return doGetCommits(apiBaseUrl, projectIdentifier, token, branch);
+        } catch (BusinessException e) {
+            // 容错：如果用户配置了 projectId，但填写错误，403/404 时尝试使用仓库路径重试
+            if (shouldRetryWithProjectPath(e, projectId)) {
+                String projectPathIdentifier = resolveProjectIdentifier(gitlabUrl, null);
+                if (StrUtil.isNotBlank(projectPathIdentifier) && !projectPathIdentifier.equals(projectIdentifier)) {
+                    log.warn("[GitLab客户端] 获取提交记录失败，尝试使用仓库路径重试，projectId={}", projectId);
+                    return doGetCommits(apiBaseUrl, projectPathIdentifier, token, branch);
                 }
-
-                // 统计信息需要单独请求
-                gitCommit.setAdditions(0);
-                gitCommit.setDeletions(0);
-
-                result.add(gitCommit);
             }
-
-            log.info("[GitLab客户端] 获取提交记录成功，数量: {}", result.size());
-            return result;
-
-        } catch (IOException e) {
-            log.error("[GitLab客户端] 请求异常，URL: {}", apiUrl, e);
-            throw new BusinessException(500, "GitLab API请求异常: " + e.getMessage());
+            throw e;
         }
     }
 
@@ -199,54 +149,19 @@ public class GitLabClient {
         if (StrUtil.isBlank(projectIdentifier)) {
             throw new BusinessException(400, "GitLab仓库地址格式不正确");
         }
-        String encodedBranch = URLEncoder.encode(branch, StandardCharsets.UTF_8);
 
-        // 构建API请求URL
-        String apiUrl = String.format("%s/api/v4/projects/%s/repository/commits?ref_name=%s&since=%s&until=%s&per_page=100",
-                apiBaseUrl, projectIdentifier, encodedBranch, sinceStr, untilStr);
-
-        Request request = new Request.Builder()
-                .url(apiUrl)
-                .header("PRIVATE-TOKEN", token)
-                .get()
-                .build();
-
-        try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                String errorBody = response.body() != null ? response.body().string() : "无响应内容";
-                log.error("[GitLab客户端] 请求失败，状态码: {}, 响应: {}", response.code(), errorBody);
-                throw new BusinessException(500, "GitLab API请求失败: " + response.code());
-            }
-
-            String responseBody = response.body() != null ? response.body().string() : "[]";
-            JSONArray commits = JSON.parseArray(responseBody);
-
-            List<GitCommit> result = new ArrayList<>();
-            for (int i = 0; i < commits.size(); i++) {
-                JSONObject commit = commits.getJSONObject(i);
-                GitCommit gitCommit = new GitCommit();
-                gitCommit.setCommitId(commit.getString("id"));
-                gitCommit.setMessage(commit.getString("title"));
-                gitCommit.setAuthorName(commit.getString("author_name"));
-                gitCommit.setAuthorEmail(commit.getString("author_email"));
-
-                String committedDate = commit.getString("committed_date");
-                if (StrUtil.isNotBlank(committedDate)) {
-                    gitCommit.setCommittedAt(parseDateTime(committedDate));
+        try {
+            return doGetCommitsByTimeRange(apiBaseUrl, projectIdentifier, token, branch, sinceStr, untilStr);
+        } catch (BusinessException e) {
+            // 容错：如果用户配置了 projectId，但填写错误，403/404 时尝试使用仓库路径重试
+            if (shouldRetryWithProjectPath(e, projectId)) {
+                String projectPathIdentifier = resolveProjectIdentifier(gitlabUrl, null);
+                if (StrUtil.isNotBlank(projectPathIdentifier) && !projectPathIdentifier.equals(projectIdentifier)) {
+                    log.warn("[GitLab客户端] 获取提交记录失败，尝试使用仓库路径重试，projectId={}", projectId);
+                    return doGetCommitsByTimeRange(apiBaseUrl, projectPathIdentifier, token, branch, sinceStr, untilStr);
                 }
-
-                gitCommit.setAdditions(0);
-                gitCommit.setDeletions(0);
-
-                result.add(gitCommit);
             }
-
-            log.info("[GitLab客户端] 获取时间范围内的提交记录成功，数量: {}", result.size());
-            return result;
-
-        } catch (IOException e) {
-            log.error("[GitLab客户端] 请求异常", e);
-            throw new BusinessException(500, "GitLab API请求异常: " + e.getMessage());
+            throw e;
         }
     }
 
@@ -268,20 +183,230 @@ public class GitLabClient {
         }
         String apiUrl = String.format("%s/api/v4/projects/%s", apiBaseUrl, projectIdentifier);
 
-        Request request = new Request.Builder()
-                .url(apiUrl)
-                .header("PRIVATE-TOKEN", token)
-                .get()
-                .build();
+        try {
+            return doTestConnection(apiUrl, token);
+        } catch (BusinessException e) {
+            if (shouldRetryWithProjectPath(e, projectId)) {
+                String projectPathIdentifier = resolveProjectIdentifier(gitlabUrl, null);
+                if (StrUtil.isNotBlank(projectPathIdentifier) && !projectPathIdentifier.equals(projectIdentifier)) {
+                    String retryUrl = String.format("%s/api/v4/projects/%s", apiBaseUrl, projectPathIdentifier);
+                    log.warn("[GitLab客户端] 连接测试失败，尝试使用仓库路径重试，projectId={}", projectId);
+                    return doTestConnection(retryUrl, token);
+                }
+            }
+            return false;
+        }
+    }
+
+    private boolean doTestConnection(String apiUrl, String token) {
+        Request request = buildGetRequest(apiUrl, token);
 
         try (Response response = httpClient.newCall(request).execute()) {
             boolean success = response.isSuccessful();
             log.info("[GitLab客户端] 连接测试结果: {}", success ? "成功" : "失败");
-            return success;
+            if (!success) {
+                String errorBody = response.body() != null ? response.body().string() : "";
+                log.warn("[GitLab客户端] 连接测试失败，状态码: {}, 响应: {}", response.code(), errorBody);
+                throw buildGitLabApiException(response.code(), errorBody);
+            }
+            return true;
         } catch (IOException e) {
             log.error("[GitLab客户端] 连接测试异常", e);
             return false;
         }
+    }
+
+    private List<BranchInfo> doListBranches(String apiBaseUrl, String projectIdentifier, String token) {
+        String apiUrl = String.format("%s/api/v4/projects/%s/repository/branches?per_page=100",
+                apiBaseUrl, projectIdentifier);
+        log.info("[GitLab客户端] 请求URL: {}", apiUrl);
+
+        String responseBody = executeGet(apiUrl, token, "获取分支列表");
+        JSONArray branches = JSON.parseArray(StrUtil.blankToDefault(responseBody, "[]"));
+
+        List<BranchInfo> result = new ArrayList<>();
+        for (int i = 0; i < branches.size(); i++) {
+            JSONObject branch = branches.getJSONObject(i);
+            String name = branch.getString("name");
+            if (StrUtil.isNotBlank(name)) {
+                boolean isDefault = Boolean.TRUE.equals(branch.getBoolean("default"));
+                result.add(new BranchInfo(name, isDefault));
+            }
+        }
+
+        log.info("[GitLab客户端] 获取分支列表成功，数量: {}", result.size());
+        return result;
+    }
+
+    private List<GitCommit> doGetCommits(String apiBaseUrl, String projectIdentifier, String token, String branch) {
+        String encodedBranch = URLEncoder.encode(branch, StandardCharsets.UTF_8);
+
+        String apiUrl = String.format("%s/api/v4/projects/%s/repository/commits?ref_name=%s&per_page=100",
+                apiBaseUrl, projectIdentifier, encodedBranch);
+
+        log.info("[GitLab客户端] 请求URL: {}", apiUrl);
+
+        String responseBody = executeGet(apiUrl, token, "获取提交记录");
+        log.info("[GitLab客户端] 响应内容: {}",
+                responseBody.length() > 500 ? responseBody.substring(0, 500) + "..." : responseBody);
+
+        JSONArray commits = JSON.parseArray(StrUtil.blankToDefault(responseBody, "[]"));
+
+        List<GitCommit> result = new ArrayList<>();
+        for (int i = 0; i < commits.size(); i++) {
+            JSONObject commit = commits.getJSONObject(i);
+            GitCommit gitCommit = new GitCommit();
+            gitCommit.setCommitId(commit.getString("id"));
+            gitCommit.setMessage(commit.getString("title"));
+            gitCommit.setAuthorName(commit.getString("author_name"));
+            gitCommit.setAuthorEmail(commit.getString("author_email"));
+
+            // 解析提交时间
+            String committedDate = commit.getString("committed_date");
+            if (StrUtil.isNotBlank(committedDate)) {
+                gitCommit.setCommittedAt(parseDateTime(committedDate));
+            }
+
+            // 统计信息需要单独请求
+            gitCommit.setAdditions(0);
+            gitCommit.setDeletions(0);
+
+            result.add(gitCommit);
+        }
+
+        log.info("[GitLab客户端] 获取提交记录成功，数量: {}", result.size());
+        return result;
+    }
+
+    private List<GitCommit> doGetCommitsByTimeRange(String apiBaseUrl, String projectIdentifier, String token,
+                                                    String branch, String sinceStr, String untilStr) {
+        String encodedBranch = URLEncoder.encode(branch, StandardCharsets.UTF_8);
+
+        String apiUrl = String.format("%s/api/v4/projects/%s/repository/commits?ref_name=%s&since=%s&until=%s&per_page=100",
+                apiBaseUrl, projectIdentifier, encodedBranch, sinceStr, untilStr);
+
+        log.info("[GitLab客户端] 请求URL: {}", apiUrl);
+
+        String responseBody = executeGet(apiUrl, token, "获取时间范围内提交记录");
+        JSONArray commits = JSON.parseArray(StrUtil.blankToDefault(responseBody, "[]"));
+
+        List<GitCommit> result = new ArrayList<>();
+        for (int i = 0; i < commits.size(); i++) {
+            JSONObject commit = commits.getJSONObject(i);
+            GitCommit gitCommit = new GitCommit();
+            gitCommit.setCommitId(commit.getString("id"));
+            gitCommit.setMessage(commit.getString("title"));
+            gitCommit.setAuthorName(commit.getString("author_name"));
+            gitCommit.setAuthorEmail(commit.getString("author_email"));
+
+            String committedDate = commit.getString("committed_date");
+            if (StrUtil.isNotBlank(committedDate)) {
+                gitCommit.setCommittedAt(parseDateTime(committedDate));
+            }
+
+            gitCommit.setAdditions(0);
+            gitCommit.setDeletions(0);
+
+            result.add(gitCommit);
+        }
+
+        log.info("[GitLab客户端] 获取时间范围内的提交记录成功，数量: {}", result.size());
+        return result;
+    }
+
+    private String executeGet(String apiUrl, String token, String scene) {
+        Request request = buildGetRequest(apiUrl, token);
+
+        try (Response response = httpClient.newCall(request).execute()) {
+            String responseBody = response.body() != null ? response.body().string() : "";
+            if (!response.isSuccessful()) {
+                log.error("[GitLab客户端] {}失败，状态码: {}, 响应: {}", scene, response.code(), responseBody);
+                throw buildGitLabApiException(response.code(), responseBody);
+            }
+            return responseBody;
+        } catch (IOException e) {
+            log.error("[GitLab客户端] {}请求异常，URL: {}", scene, apiUrl, e);
+            throw new BusinessException(500, "GitLab API请求异常: " + e.getMessage());
+        }
+    }
+
+    private Request buildGetRequest(String apiUrl, String token) {
+        return new Request.Builder()
+                .url(apiUrl)
+                .header("PRIVATE-TOKEN", token)
+                .header("User-Agent", USER_AGENT)
+                .get()
+                .build();
+    }
+
+    private BusinessException buildGitLabApiException(int httpCode, String errorBody) {
+        String reason = extractGitLabErrorReason(errorBody);
+
+        String message;
+        switch (httpCode) {
+            case 401:
+                message = "GitLab Token 无效或已过期";
+                break;
+            case 403:
+                message = "GitLab Token 无权限访问该项目（请确认 token scope: read_api/api，并确保对项目有访问权限）";
+                break;
+            case 404:
+                message = "GitLab 项目不存在或无权限（请核对 projectId/仓库URL）";
+                break;
+            case 429:
+                message = "GitLab API 请求过于频繁，请稍后重试";
+                break;
+            default:
+                message = "GitLab API请求失败: " + httpCode;
+                break;
+        }
+
+        if (StrUtil.isNotBlank(reason) && !message.contains(reason)) {
+            message = message + ": " + reason;
+        }
+
+        int bizCode = httpCode;
+        if (bizCode < 400 || bizCode > 599) {
+            bizCode = 500;
+        }
+        return new BusinessException(bizCode, message);
+    }
+
+    private String extractGitLabErrorReason(String errorBody) {
+        if (StrUtil.isBlank(errorBody)) {
+            return "";
+        }
+
+        try {
+            JSONObject obj = JSON.parseObject(errorBody);
+            Object message = obj.get("message");
+            if (message != null) {
+                return message.toString();
+            }
+            String errorDesc = obj.getString("error_description");
+            if (StrUtil.isNotBlank(errorDesc)) {
+                return errorDesc;
+            }
+            String error = obj.getString("error");
+            if (StrUtil.isNotBlank(error)) {
+                return error;
+            }
+        } catch (Exception ignored) {
+            // 忽略解析异常，走兜底
+        }
+
+        String trimmed = errorBody.trim();
+        if (trimmed.length() > 200) {
+            return trimmed.substring(0, 200) + "...";
+        }
+        return trimmed;
+    }
+
+    private boolean shouldRetryWithProjectPath(BusinessException e, Integer projectId) {
+        if (projectId == null || projectId <= 0) {
+            return false;
+        }
+        return e.getCode() != null && (e.getCode() == 403 || e.getCode() == 404);
     }
 
     /**
