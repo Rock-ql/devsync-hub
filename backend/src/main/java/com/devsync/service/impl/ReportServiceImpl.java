@@ -257,12 +257,20 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     }
 
     private String buildRequirementGroupedSummary(List<GitCommit> commits, TemplateRule rule) {
+        List<GitCommit> displayCommits = commits.stream()
+                .filter(commit -> !isMergeCommit(commit))
+                .toList();
+
+        if (displayCommits.isEmpty()) {
+            return "暂无提交记录";
+        }
+
         List<Requirement> allRequirements = requirementMapper.selectList(new LambdaQueryWrapper<Requirement>()
                 .eq(Requirement::getState, 1)
                 .orderByDesc(Requirement::getUpdatedAt));
 
         if (allRequirements.isEmpty()) {
-            return renderFlat(commits, rule);
+            return renderFlat(displayCommits, rule);
         }
 
         List<Requirement> codedRequirements = allRequirements.stream()
@@ -270,7 +278,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                 .toList();
 
         if (codedRequirements.isEmpty()) {
-            return renderFlat(commits, rule);
+            return renderFlat(displayCommits, rule);
         }
 
         Map<Integer, Set<Integer>> requirementProjectIds = loadRequirementProjectIds(codedRequirements);
@@ -290,16 +298,29 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
         otherCommits = assignUnmatchedCommitsByNearestAnchor(otherCommits, requirementCommits, codedRequirements);
 
-        boolean hasMatchedRequirementCommits = requirementCommits.values().stream()
-                .anyMatch(list -> list != null && !list.isEmpty());
+        Map<Integer, List<GitCommit>> displayRequirementCommits = new LinkedHashMap<>();
+        for (Map.Entry<Integer, List<GitCommit>> entry : requirementCommits.entrySet()) {
+            List<GitCommit> filtered = entry.getValue().stream()
+                    .filter(commit -> !isMergeCommit(commit))
+                    .toList();
+            if (!filtered.isEmpty()) {
+                displayRequirementCommits.put(entry.getKey(), filtered);
+            }
+        }
+
+        List<GitCommit> displayOtherCommits = otherCommits.stream()
+                .filter(commit -> !isMergeCommit(commit))
+                .toList();
+
+        boolean hasMatchedRequirementCommits = !displayRequirementCommits.isEmpty();
         if (!hasMatchedRequirementCommits) {
-            return renderFlat(commits, rule);
+            return renderFlat(displayCommits, rule);
         }
 
         StringBuilder sb = new StringBuilder();
         sb.append("## 需求工作:\n");
         for (Requirement requirement : codedRequirements) {
-            List<GitCommit> groupedCommits = requirementCommits.get(requirement.getId());
+            List<GitCommit> groupedCommits = displayRequirementCommits.get(requirement.getId());
             if (groupedCommits == null || groupedCommits.isEmpty()) {
                 continue;
             }
@@ -328,7 +349,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         }
 
         sb.append("## 其他工作:\n");
-        appendOtherWorkByProject(sb, otherCommits, rule, projectNameMap);
+        appendOtherWorkByProject(sb, displayOtherCommits, rule, projectNameMap);
 
         return sb.toString().trim();
     }
@@ -741,6 +762,17 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         return result;
     }
 
+    private boolean isMergeCommit(GitCommit commit) {
+        if (commit == null || StrUtil.isBlank(commit.getMessage())) {
+            return false;
+        }
+        String message = StrUtil.trim(commit.getMessage()).toLowerCase();
+        return message.startsWith("merge branch")
+                || message.startsWith("merge remote-tracking branch")
+                || message.startsWith("merge pull request")
+                || message.startsWith("merge !");
+    }
+
     @Override
     public PageResult<ReportRsp> listReports(ReportListReq req) {
         log.info("[报告管理] 分页查询报告列表，类型: {}", req.getType());
@@ -818,9 +850,16 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         dailyWrapper.eq(Report::getType, ReportTypeEnum.DAILY.getCode())
                 .ge(Report::getStartDate, monthStart)
                 .le(Report::getStartDate, monthEnd)
-                .orderByAsc(Report::getStartDate);
+                .orderByAsc(Report::getStartDate)
+                .orderByDesc(Report::getCreatedAt)
+                .orderByDesc(Report::getId);
 
         List<Report> dailyReports = reportMapper.selectList(dailyWrapper);
+        Map<LocalDate, Report> latestDailyReportMap = new LinkedHashMap<>();
+        for (Report report : dailyReports) {
+            latestDailyReportMap.putIfAbsent(report.getStartDate(), report);
+        }
+        List<Report> latestDailyReports = new java.util.ArrayList<>(latestDailyReportMap.values());
 
         LambdaQueryWrapper<Report> weeklyWrapper = new LambdaQueryWrapper<>();
         weeklyWrapper.eq(Report::getType, ReportTypeEnum.WEEKLY.getCode())
@@ -831,7 +870,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         List<Report> weeklyReports = reportMapper.selectList(weeklyWrapper);
 
         ReportMonthSummaryRsp rsp = new ReportMonthSummaryRsp();
-        rsp.setDailyReports(dailyReports.stream()
+        rsp.setDailyReports(latestDailyReports.stream()
                 .map(report -> {
                     ReportMonthSummaryRsp.DailyReportSummary item = new ReportMonthSummaryRsp.DailyReportSummary();
                     item.setId(report.getId());

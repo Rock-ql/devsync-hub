@@ -142,9 +142,7 @@ export default function Reports() {
 
   const generateMutation = useMutation({
     mutationFn: (data: typeof generateForm) => api.post<Report>('/report/generate', data),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['report-month-summary'] })
-      queryClient.invalidateQueries({ queryKey: ['report-detail'] })
+    onSuccess: async (data) => {
       setIsGenerateModalOpen(false)
       const startDate = parseISO(data.startDate)
       const nextMonth = startOfMonth(startDate)
@@ -163,6 +161,12 @@ export default function Reports() {
       } else {
         setPanelState({ mode: 'daily', date: startDate })
       }
+
+      const monthKey = format(nextMonth, 'yyyy-MM')
+      await queryClient.invalidateQueries({ queryKey: ['report-month-summary', monthKey] })
+      await queryClient.invalidateQueries({ queryKey: ['report-detail', data.id] })
+      await queryClient.refetchQueries({ queryKey: ['report-month-summary', monthKey], type: 'active' })
+      await queryClient.refetchQueries({ queryKey: ['report-detail', data.id], type: 'active' })
     },
   })
 
