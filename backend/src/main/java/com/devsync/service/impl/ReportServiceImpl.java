@@ -151,7 +151,8 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                 : defaultTitle;
 
         String content;
-        if (useSettingTemplate) {
+        boolean hasCommitsPlaceholder = templateContainsCommitsPlaceholder(templateContent);
+        if (useSettingTemplate && hasCommitsPlaceholder) {
             content = renderTemplate(templateContent, req, commitsText, title);
         } else {
             try {
@@ -511,6 +512,13 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             }
         }
         return false;
+    }
+
+    private boolean templateContainsCommitsPlaceholder(String template) {
+        if (StrUtil.isBlank(template)) {
+            return false;
+        }
+        return template.contains("{{commits}}") || template.contains("{commits}");
     }
 
     @Override
