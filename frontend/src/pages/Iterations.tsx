@@ -15,8 +15,8 @@ import RequirementList from '@/components/requirement/RequirementList'
 
 interface Iteration {
   id: number
-  projectId: number
-  projectName: string
+  projectId: number | null
+  projectName: string | null
   name: string
   description: string
   status: string
@@ -72,7 +72,7 @@ export default function Iterations() {
 
   const addMutation = useMutation({
     mutationFn: (data: typeof formData) =>
-      api.post('/iteration/add', { ...data, projectId: parseInt(data.projectId) }),
+      api.post('/iteration/add', { ...data, projectId: data.projectId ? parseInt(data.projectId) : null }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['iterations'] })
       setIsModalOpen(false)
@@ -119,7 +119,7 @@ export default function Iterations() {
   const handleEdit = (iteration: Iteration) => {
     setEditingIteration(iteration)
     setFormData({
-      projectId: iteration.projectId.toString(),
+      projectId: iteration.projectId?.toString() || '',
       name: iteration.name,
       description: iteration.description || '',
       status: iteration.status,
@@ -198,7 +198,7 @@ export default function Iterations() {
                           {iteration.name}
                         </td>
                         <td className="px-6 py-4 text-sm text-muted-foreground">
-                          {iteration.projectName}
+                          {iteration.projectName || '未关联项目'}
                         </td>
                         <td className="px-6 py-4">
                           <Select
@@ -299,7 +299,7 @@ export default function Iterations() {
             <Card key={iteration.id}>
               <CardHeader className="space-y-2">
                 <CardTitle className="text-base">{iteration.name}</CardTitle>
-                <p className="text-sm text-muted-foreground">{iteration.projectName}</p>
+                <p className="text-sm text-muted-foreground">{iteration.projectName || '未关联项目'}</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap gap-2">
@@ -396,14 +396,13 @@ export default function Iterations() {
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label>所属项目 *</Label>
+              <Label>所属项目</Label>
               <Select
                 value={formData.projectId}
                 onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
-                required
                 disabled={!!editingIteration}
               >
-                <option value="">请选择项目</option>
+                <option value="">不关联项目</option>
                 {projects?.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}

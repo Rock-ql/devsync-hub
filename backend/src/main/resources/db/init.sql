@@ -31,7 +31,7 @@ COMMENT ON COLUMN project.state IS '状态 1:启用 2:归档';
 CREATE TABLE IF NOT EXISTS iteration (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL DEFAULT 1,
-    project_id INTEGER NOT NULL,
+    project_id INTEGER DEFAULT NULL,
     name VARCHAR(100) NOT NULL,
     description TEXT DEFAULT '',
     status VARCHAR(20) NOT NULL DEFAULT 'planning',
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS iteration (
 );
 
 COMMENT ON TABLE iteration IS '迭代表';
-COMMENT ON COLUMN iteration.project_id IS '关联项目ID';
+COMMENT ON COLUMN iteration.project_id IS '关联项目ID（可选）';
 COMMENT ON COLUMN iteration.name IS '迭代名称';
 COMMENT ON COLUMN iteration.status IS '状态: planning/developing/testing/released';
 

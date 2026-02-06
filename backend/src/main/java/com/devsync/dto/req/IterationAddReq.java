@@ -17,8 +17,7 @@ import java.time.LocalDate;
 @Schema(description = "迭代新增请求")
 public class IterationAddReq {
 
-    @NotNull(message = "项目ID不能为空")
-    @Schema(description = "项目ID")
+    @Schema(description = "项目ID（可选）")
     private Integer projectId;
 
     @NotBlank(message = "迭代名称不能为空")

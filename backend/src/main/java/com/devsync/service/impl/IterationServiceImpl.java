@@ -94,10 +94,12 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
     public Integer addIteration(IterationAddReq req) {
         log.info("[迭代管理] 新增迭代，项目ID: {}, 名称: {}", req.getProjectId(), req.getName());
 
-        // 验证项目是否存在
-        Project project = projectMapper.selectById(req.getProjectId());
-        if (project == null) {
-            throw new BusinessException(404, "项目不存在");
+        // 验证项目是否存在（项目ID可选）
+        if (req.getProjectId() != null) {
+            Project project = projectMapper.selectById(req.getProjectId());
+            if (project == null) {
+                throw new BusinessException(404, "指定的项目不存在");
+            }
         }
 
         Iteration iteration = new Iteration();
@@ -190,10 +192,12 @@ public class IterationServiceImpl extends ServiceImpl<IterationMapper, Iteration
         IterationRsp rsp = new IterationRsp();
         BeanUtil.copyProperties(iteration, rsp);
 
-        // 获取项目名称
-        Project project = projectMapper.selectById(iteration.getProjectId());
-        if (project != null) {
-            rsp.setProjectName(project.getName());
+        // 获取项目名称（项目ID可选）
+        if (iteration.getProjectId() != null) {
+            Project project = projectMapper.selectById(iteration.getProjectId());
+            if (project != null) {
+                rsp.setProjectName(project.getName());
+            }
         }
 
         // 获取状态描述
