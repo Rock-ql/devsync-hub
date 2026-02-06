@@ -239,6 +239,8 @@ CREATE TABLE IF NOT EXISTS requirement (
     user_id INTEGER NOT NULL DEFAULT 1,
     iteration_id INTEGER NOT NULL,
     name VARCHAR(500) NOT NULL,
+    requirement_code VARCHAR(50) NOT NULL DEFAULT '',
+    environment VARCHAR(30) NOT NULL DEFAULT '',
     link VARCHAR(1000) DEFAULT '',
     status VARCHAR(30) NOT NULL DEFAULT 'presented',
     branch VARCHAR(200) NOT NULL DEFAULT '',
@@ -253,11 +255,19 @@ ALTER TABLE requirement
     ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'presented';
 
 ALTER TABLE requirement
+    ADD COLUMN IF NOT EXISTS requirement_code VARCHAR(50) NOT NULL DEFAULT '';
+
+ALTER TABLE requirement
+    ADD COLUMN IF NOT EXISTS environment VARCHAR(30) NOT NULL DEFAULT '';
+
+ALTER TABLE requirement
     ADD COLUMN IF NOT EXISTS branch VARCHAR(200) NOT NULL DEFAULT '';
 
 COMMENT ON TABLE requirement IS '需求表';
 COMMENT ON COLUMN requirement.iteration_id IS '归属迭代ID（必填）';
 COMMENT ON COLUMN requirement.name IS '需求名称';
+COMMENT ON COLUMN requirement.requirement_code IS '需求编号';
+COMMENT ON COLUMN requirement.environment IS '当前环境';
 COMMENT ON COLUMN requirement.link IS '需求链接URL';
 COMMENT ON COLUMN requirement.status IS '需求状态';
 COMMENT ON COLUMN requirement.branch IS '关联Git分支名称';

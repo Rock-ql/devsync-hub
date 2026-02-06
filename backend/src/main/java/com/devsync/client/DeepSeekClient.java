@@ -170,6 +170,43 @@ public class DeepSeekClient {
     }
 
     /**
+     * 生成按需求分组的日报内容
+     *
+     * @param structuredCommits 按需求分组后的结构化提交文本
+     * @param template          日报模板
+     * @return 生成的日报内容
+     */
+    public String generateDailyReportByRequirement(String structuredCommits, String template) {
+        String systemPrompt = """
+            你是一个专业的软件开发日报生成助手。
+
+            任务要求：
+            1. 严格基于输入内容输出，不编造不存在的需求和工作。
+            2. 输出格式必须是：
+               今日工作内容：
+               1. 需求编号【项目名】需求名（状态，环境）
+                  1. 具体工作A
+                  2. 具体工作B
+            3. 对“其他工作”也要保留并输出，不可遗漏。
+            4. 合并语义重复的提交信息，使用简洁中文描述。
+            5. 若某需求无环境信息，只保留状态，不要额外补充环境。
+            6. 一级条目使用阿拉伯数字编号，二级条目也使用阿拉伯数字编号。
+            """;
+
+        String userPrompt = String.format("""
+            请根据以下“按需求分组的结构化提交信息”和模板生成今日日报。
+
+            【结构化提交信息】
+            %s
+
+            【日报模板】
+            %s
+            """, structuredCommits, template);
+
+        return chat(systemPrompt, userPrompt);
+    }
+
+    /**
      * 测试API连接
      *
      * @return 是否连接成功

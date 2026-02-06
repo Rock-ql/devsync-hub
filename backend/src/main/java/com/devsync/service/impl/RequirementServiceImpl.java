@@ -118,6 +118,8 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
         Requirement requirement = new Requirement();
         requirement.setIterationId(req.getIterationId());
         requirement.setName(req.getName());
+        requirement.setRequirementCode(StrUtil.blankToDefault(StrUtil.trim(req.getRequirementCode()), ""));
+        requirement.setEnvironment(StrUtil.blankToDefault(StrUtil.trim(req.getEnvironment()), ""));
         requirement.setLink(StrUtil.blankToDefault(req.getLink(), ""));
         requirement.setBranch(StrUtil.blankToDefault(req.getBranch(), ""));
 
@@ -145,6 +147,8 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
         }
 
         requirement.setName(req.getName());
+        requirement.setRequirementCode(StrUtil.blankToDefault(StrUtil.trim(req.getRequirementCode()), ""));
+        requirement.setEnvironment(StrUtil.blankToDefault(StrUtil.trim(req.getEnvironment()), ""));
         requirement.setLink(StrUtil.blankToDefault(req.getLink(), ""));
         requirement.setBranch(StrUtil.blankToDefault(req.getBranch(), ""));
 

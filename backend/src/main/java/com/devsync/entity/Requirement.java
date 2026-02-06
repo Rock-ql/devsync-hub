@@ -27,6 +27,16 @@ public class Requirement extends BaseEntity {
     private String name;
 
     /**
+     * 需求编号（如 XYGJ-1042）
+     */
+    private String requirementCode;
+
+    /**
+     * 当前环境（如 dev/smoke/prod）
+     */
+    private String environment;
+
+    /**
      * 需求链接
      */
     private String link;

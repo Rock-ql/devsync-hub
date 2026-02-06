@@ -33,6 +33,8 @@ export default function RequirementDialog({
   onSaved,
 }: RequirementDialogProps) {
   const [name, setName] = useState('')
+  const [requirementCode, setRequirementCode] = useState('')
+  const [environment, setEnvironment] = useState('')
   const [link, setLink] = useState('')
   const [selectedProjectIds, setSelectedProjectIds] = useState<number[]>([])
   const [status, setStatus] = useState('presented')
@@ -55,6 +57,8 @@ export default function RequirementDialog({
   useEffect(() => {
     if (open) {
       setName(initialData?.name || '')
+      setRequirementCode(initialData?.requirementCode || '')
+      setEnvironment(initialData?.environment || '')
       setLink(initialData?.link || '')
       setSelectedProjectIds(initialData?.projectIds || [])
       setStatus(initialData?.status || 'presented')
@@ -88,6 +92,8 @@ export default function RequirementDialog({
         return requirementApi.update({
           id: initialData.id,
           name: name.trim(),
+          requirementCode: requirementCode.trim(),
+          environment: environment.trim(),
           link: link.trim(),
           projectIds: selectedProjectIds,
           status,
@@ -97,6 +103,8 @@ export default function RequirementDialog({
       return requirementApi.add({
         iterationId,
         name: name.trim(),
+        requirementCode: requirementCode.trim(),
+        environment: environment.trim(),
         link: link.trim(),
         projectIds: selectedProjectIds,
         status,
@@ -136,6 +144,25 @@ export default function RequirementDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder="输入需求名称"
             />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>需求编号</Label>
+              <Input
+                value={requirementCode}
+                onChange={(e) => setRequirementCode(e.target.value)}
+                placeholder="如 XYGJ-1042"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>当前环境</Label>
+              <Select value={environment} onChange={(e) => setEnvironment(e.target.value)}>
+                <option value="">未填写</option>
+                <option value="dev">dev</option>
+                <option value="smoke">smoke</option>
+                <option value="prod">prod</option>
+              </Select>
+            </div>
           </div>
           <div className="space-y-2">
             <Label>需求链接</Label>

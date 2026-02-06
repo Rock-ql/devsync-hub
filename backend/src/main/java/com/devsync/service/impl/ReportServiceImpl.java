@@ -22,10 +22,14 @@ import com.devsync.entity.GitCommit;
 import com.devsync.entity.Project;
 import com.devsync.entity.Report;
 import com.devsync.entity.ReportTemplate;
+import com.devsync.entity.Requirement;
+import com.devsync.entity.RequirementProject;
 import com.devsync.mapper.GitCommitMapper;
 import com.devsync.mapper.ProjectMapper;
 import com.devsync.mapper.ReportMapper;
 import com.devsync.mapper.ReportTemplateMapper;
+import com.devsync.mapper.RequirementMapper;
+import com.devsync.mapper.RequirementProjectMapper;
 import com.devsync.service.IReportService;
 import com.devsync.service.ISystemSettingService;
 import com.devsync.util.EncryptUtil;
@@ -40,6 +44,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +69,8 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
     private final GitLabClient gitLabClient;
     private final DeepSeekClient deepSeekClient;
     private final ISystemSettingService systemSettingService;
+    private final RequirementMapper requirementMapper;
+    private final RequirementProjectMapper requirementProjectMapper;
     private final EncryptUtil encryptUtil;
 
     private static final String DAILY_TEMPLATE_KEY = "report.template.daily";
@@ -131,7 +138,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         String templateContent = useSettingTemplate ? settingTemplate : template.getContent();
 
         TemplateRule rule = parseTemplateRule(templateContent);
-        String commitsText = buildCommitSummary(allCommits, rule);
+        String commitsText = buildCommitSummary(allCommits, rule, reportType);
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
         String defaultTitle = reportType.getDesc() + " - " + req.getStartDate().format(formatter);
@@ -148,7 +155,11 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             content = renderTemplate(templateContent, req, commitsText, title);
         } else {
             try {
-                content = deepSeekClient.generateReport(commitsText, templateContent, req.getType());
+                if (reportType == ReportTypeEnum.DAILY) {
+                    content = deepSeekClient.generateDailyReportByRequirement(commitsText, templateContent);
+                } else {
+                    content = deepSeekClient.generateReport(commitsText, templateContent, req.getType());
+                }
             } catch (Exception e) {
                 log.error("[报告生成] AI生成失败，使用模板内容", e);
                 content = renderTemplate(templateContent, req, commitsText, title);
@@ -206,9 +217,13 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         return new TemplateRule(groupByProject, numbered, detailed);
     }
 
-    private String buildCommitSummary(List<GitCommit> commits, TemplateRule rule) {
+    private String buildCommitSummary(List<GitCommit> commits, TemplateRule rule, ReportTypeEnum reportType) {
         if (commits.isEmpty()) {
             return "暂无提交记录";
+        }
+
+        if (reportType == ReportTypeEnum.DAILY) {
+            return buildRequirementGroupedSummary(commits, rule);
         }
 
         Map<Integer, String> projectNameMap = loadProjectNameMap(commits);
@@ -216,6 +231,146 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             return renderGrouped(commits, projectNameMap, rule);
         }
         return renderFlat(commits, rule);
+    }
+
+    private String buildRequirementGroupedSummary(List<GitCommit> commits, TemplateRule rule) {
+        List<Requirement> allRequirements = requirementMapper.selectList(new LambdaQueryWrapper<Requirement>()
+                .eq(Requirement::getState, 1)
+                .orderByDesc(Requirement::getUpdatedAt));
+
+        if (allRequirements.isEmpty()) {
+            return renderFlat(commits, rule);
+        }
+
+        List<Requirement> codedRequirements = allRequirements.stream()
+                .filter(requirement -> StrUtil.isNotBlank(requirement.getRequirementCode()))
+                .toList();
+
+        if (codedRequirements.isEmpty()) {
+            return renderFlat(commits, rule);
+        }
+
+        Map<Integer, Set<Integer>> requirementProjectIds = loadRequirementProjectIds(codedRequirements);
+        Map<Integer, String> projectNameMap = loadProjectNameMap(commits);
+
+        Map<Integer, List<GitCommit>> requirementCommits = new LinkedHashMap<>();
+        List<GitCommit> otherCommits = new java.util.ArrayList<>();
+
+        for (GitCommit commit : commits) {
+            Requirement matched = matchRequirement(commit, codedRequirements, requirementProjectIds);
+            if (matched == null) {
+                otherCommits.add(commit);
+                continue;
+            }
+            requirementCommits.computeIfAbsent(matched.getId(), key -> new java.util.ArrayList<>()).add(commit);
+        }
+
+        boolean hasMatchedRequirementCommits = requirementCommits.values().stream()
+                .anyMatch(list -> list != null && !list.isEmpty());
+        if (!hasMatchedRequirementCommits) {
+            return renderFlat(commits, rule);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 需求工作:\n");
+        for (Requirement requirement : codedRequirements) {
+            List<GitCommit> groupedCommits = requirementCommits.get(requirement.getId());
+            if (groupedCommits == null || groupedCommits.isEmpty()) {
+                continue;
+            }
+            Set<String> projectNames = groupedCommits.stream()
+                    .map(GitCommit::getProjectId)
+                    .filter(Objects::nonNull)
+                    .map(projectId -> projectNameMap.getOrDefault(projectId, "项目" + projectId))
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            String projectDisplay = projectNames.isEmpty() ? "未关联项目" : String.join("/", projectNames);
+            String statusText = formatRequirementStatus(requirement.getStatus());
+            String environmentText = StrUtil.blankToDefault(requirement.getEnvironment(), "").trim();
+            String bracketText = StrUtil.isNotBlank(environmentText)
+                    ? String.format("状态: %s, 环境: %s", statusText, environmentText)
+                    : String.format("状态: %s", statusText);
+            sb.append("### ")
+                    .append(requirement.getRequirementCode())
+                    .append("【")
+                    .append(projectDisplay)
+                    .append("】")
+                    .append(requirement.getName())
+                    .append(" (")
+                    .append(bracketText)
+                    .append(")\n");
+            appendCommitLines(sb, groupedCommits, rule);
+            sb.append("\n");
+        }
+
+        sb.append("## 其他工作:\n");
+        appendCommitLines(sb, otherCommits, rule);
+
+        return sb.toString().trim();
+    }
+
+    private Map<Integer, Set<Integer>> loadRequirementProjectIds(List<Requirement> requirements) {
+        List<Integer> requirementIds = requirements.stream()
+                .map(Requirement::getId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        if (requirementIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<RequirementProject> relations = requirementProjectMapper.selectList(new LambdaQueryWrapper<RequirementProject>()
+                .in(RequirementProject::getRequirementId, requirementIds));
+
+        Map<Integer, Set<Integer>> result = new HashMap<>();
+        for (RequirementProject relation : relations) {
+            result.computeIfAbsent(relation.getRequirementId(), key -> new LinkedHashSet<>())
+                    .add(relation.getProjectId());
+        }
+        return result;
+    }
+
+    private Requirement matchRequirement(GitCommit commit,
+                                         List<Requirement> requirements,
+                                         Map<Integer, Set<Integer>> requirementProjectIds) {
+        String branchName = StrUtil.blankToDefault(commit.getBranch(), "").toLowerCase();
+        boolean branchContainsAnyRequirementCode = false;
+
+        for (Requirement requirement : requirements) {
+            String requirementCode = StrUtil.blankToDefault(requirement.getRequirementCode(), "").toLowerCase();
+            if (StrUtil.isNotBlank(requirementCode) && branchName.contains(requirementCode)) {
+                branchContainsAnyRequirementCode = true;
+                return requirement;
+            }
+        }
+
+        if (branchContainsAnyRequirementCode) {
+            return null;
+        }
+
+        if (commit.getProjectId() == null) {
+            return null;
+        }
+
+        for (Requirement requirement : requirements) {
+            Set<Integer> projectIds = requirementProjectIds.get(requirement.getId());
+            if (projectIds != null && projectIds.contains(commit.getProjectId())) {
+                return requirement;
+            }
+        }
+        return null;
+    }
+
+    private String formatRequirementStatus(String statusCode) {
+        if (StrUtil.isBlank(statusCode)) {
+            return "未知状态";
+        }
+        try {
+            com.devsync.common.enums.RequirementStatusEnum statusEnum =
+                    com.devsync.common.enums.RequirementStatusEnum.getByCode(statusCode);
+            return statusEnum != null ? statusEnum.getDesc() : statusCode;
+        } catch (Exception e) {
+            return statusCode;
+        }
     }
 
     private Map<Integer, String> loadProjectNameMap(List<GitCommit> commits) {

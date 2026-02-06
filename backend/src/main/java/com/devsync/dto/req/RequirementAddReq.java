@@ -26,6 +26,14 @@ public class RequirementAddReq {
     @Schema(description = "需求名称")
     private String name;
 
+    @Size(max = 50, message = "需求编号不能超过50个字符")
+    @Schema(description = "需求编号，如 XYGJ-1042")
+    private String requirementCode;
+
+    @Size(max = 30, message = "环境标识不能超过30个字符")
+    @Schema(description = "当前环境，如 dev/smoke/prod")
+    private String environment;
+
     @Size(max = 1000, message = "需求链接不能超过1000个字符")
     @Schema(description = "需求链接")
     private String link;

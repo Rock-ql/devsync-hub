@@ -3,6 +3,8 @@ import api from '@/api'
 export interface RequirementItem {
   id: number
   name: string
+  requirementCode?: string
+  environment?: string
   link?: string
   iterationId: number
   status?: string
@@ -18,6 +20,8 @@ export interface RequirementItem {
 export interface RequirementAddPayload {
   iterationId: number
   name: string
+  requirementCode?: string
+  environment?: string
   link?: string
   projectIds?: number[]
   status?: string
@@ -27,6 +31,8 @@ export interface RequirementAddPayload {
 export interface RequirementUpdatePayload {
   id: number
   name: string
+  requirementCode?: string
+  environment?: string
   link?: string
   projectIds?: number[]
   status?: string

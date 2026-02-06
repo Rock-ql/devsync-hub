@@ -120,6 +120,9 @@ export default function RequirementList({ iterationId, iterationName, projects }
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     {item.link ? <Link2 className="h-4 w-4 text-[hsl(var(--accent))]" /> : null}
+                    {item.requirementCode && (
+                      <Badge variant="outline" tone="info">{item.requirementCode}</Badge>
+                    )}
                     {item.link ? (
                       <a
                         href={item.link}
@@ -153,6 +156,9 @@ export default function RequirementList({ iterationId, iterationName, projects }
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant="soft" tone="neutral">{item.statusDesc || '已宣讲'}</Badge>
+                {item.environment && (
+                  <Badge variant="soft" tone="warning">{item.environment}</Badge>
+                )}
                 {item.branch && (
                   <Badge variant="soft" tone="accent">
                     <GitBranch className="mr-1 h-3 w-3" />

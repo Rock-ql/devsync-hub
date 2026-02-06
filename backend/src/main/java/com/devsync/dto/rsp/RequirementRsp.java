@@ -21,6 +21,12 @@ public class RequirementRsp {
     @Schema(description = "需求名称")
     private String name;
 
+    @Schema(description = "需求编号，如 XYGJ-1042")
+    private String requirementCode;
+
+    @Schema(description = "当前环境，如 dev/smoke/prod")
+    private String environment;
+
     @Schema(description = "需求链接")
     private String link;
 
