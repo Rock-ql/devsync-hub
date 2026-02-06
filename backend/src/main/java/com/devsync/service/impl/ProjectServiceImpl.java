@@ -244,6 +244,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
             if (affected == 1) {
                 count++;
             } else {
+                gitCommitMapper.mergeBranch(id, commit.getCommitId(), commit.getBranch());
                 log.debug("[项目管理] 提交记录已存在，跳过: {}", commit.getCommitId());
             }
         }

@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.devsync.entity.GitCommit;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -28,6 +30,26 @@ public interface GitCommitMapper extends BaseMapper<GitCommit> {
             "#{committedAt}, COALESCE(#{additions}, 0), COALESCE(#{deletions}, 0), COALESCE(#{branch}, '')) " +
             "ON CONFLICT (project_id, commit_id) DO NOTHING")
     int insertIgnoreConflict(GitCommit commit);
+
+    /**
+     * 合并更新分支信息（已存在记录时补充分支）
+     *
+     * @param projectId 项目ID
+     * @param commitId  提交ID
+     * @param branch    分支信息（可为逗号分隔）
+     * @return 影响行数
+     */
+    @Update("UPDATE git_commit SET " +
+            "branch = CASE " +
+            "WHEN COALESCE(branch, '') = '' THEN #{branch} " +
+            "WHEN COALESCE(#{branch}, '') = '' THEN branch " +
+            "WHEN POSITION(#{branch} IN branch) > 0 THEN branch " +
+            "ELSE branch || ',' || #{branch} END, " +
+            "updated_at = NOW() " +
+            "WHERE project_id = #{projectId} AND commit_id = #{commitId} AND deleted_at IS NULL")
+    int mergeBranch(@Param("projectId") Integer projectId,
+                    @Param("commitId") String commitId,
+                    @Param("branch") String branch);
 
     /**
      * 查询指定时间范围内的提交记录

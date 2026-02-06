@@ -388,6 +388,8 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             String requirementCode = StrUtil.blankToDefault(getRequirementCode(requirement), "").toLowerCase();
             if (StrUtil.isNotBlank(requirementCode)
                     && branchCandidates.stream().anyMatch(candidate -> candidate.contains(requirementCode))) {
+                log.debug("[报告生成] 提交命中需求(分支匹配)，commitId={}, branch={}, requirementCode={}",
+                        commit.getCommitId(), commit.getBranch(), requirementCode);
                 return requirement;
             }
         }
@@ -397,6 +399,8 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             for (Requirement requirement : requirements) {
                 String requirementCode = StrUtil.blankToDefault(getRequirementCode(requirement), "").toLowerCase();
                 if (messageCode.equals(requirementCode)) {
+                    log.debug("[报告生成] 提交命中需求(message匹配)，commitId={}, messageCode={}, requirementCode={}",
+                            commit.getCommitId(), messageCode, requirementCode);
                     return requirement;
                 }
             }
@@ -416,6 +420,8 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         }
 
         if (projectMatchedRequirements.size() == 1) {
+            log.debug("[报告生成] 提交命中需求(项目唯一回退)，commitId={}, projectId={}, requirementId={}",
+                    commit.getCommitId(), commit.getProjectId(), projectMatchedRequirements.get(0).getId());
             return projectMatchedRequirements.get(0);
         }
         return null;
@@ -815,7 +821,8 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                     commit.setProjectId(project.getId());
                     int affected = gitCommitMapper.insertIgnoreConflict(commit);
                     if (affected == 0) {
-                        log.debug("[报告生成] 提交记录已存在，跳过: {}", commit.getCommitId());
+                        gitCommitMapper.mergeBranch(project.getId(), commit.getCommitId(), commit.getBranch());
+                        log.debug("[报告生成] 提交记录已存在，合并分支: {}", commit.getCommitId());
                     }
                 }
             } catch (Exception e) {
