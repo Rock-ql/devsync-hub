@@ -17,10 +17,14 @@ import com.devsync.dto.rsp.SqlEnvConfigRsp;
 import com.devsync.entity.Iteration;
 import com.devsync.entity.PendingSql;
 import com.devsync.entity.Project;
+import com.devsync.entity.Requirement;
 import com.devsync.entity.SqlExecutionLog;
+import com.devsync.entity.WorkItemLink;
 import com.devsync.mapper.IterationMapper;
 import com.devsync.mapper.PendingSqlMapper;
 import com.devsync.mapper.ProjectMapper;
+import com.devsync.mapper.RequirementMapper;
+import com.devsync.mapper.WorkItemLinkMapper;
 import com.devsync.service.IPendingSqlService;
 import com.devsync.service.ISqlEnvConfigService;
 import com.devsync.service.ISqlExecutionLogService;
@@ -30,9 +34,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -50,6 +58,8 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
     private final IterationMapper iterationMapper;
     private final ISqlEnvConfigService sqlEnvConfigService;
     private final ISqlExecutionLogService sqlExecutionLogService;
+    private final WorkItemLinkMapper workItemLinkMapper;
+    private final RequirementMapper requirementMapper;
 
     @Override
     public PageResult<PendingSqlRsp> listSql(PendingSqlListReq req) {
@@ -257,8 +267,11 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
         Map<Integer, List<SqlEnvConfigRsp>> envByProject =
                 sqlEnvConfigService.listByProjectIds(projectIds);
 
+        // 批量查询所有SQL关联的需求名称
+        Map<Integer, String> linkedRequirementNameMap = buildLinkedRequirementNameMap(sqlIds);
+
         return records.stream()
-                .map(sql -> convertToRsp(sql, envByProject, logsBySql))
+                .map(sql -> convertToRsp(sql, envByProject, logsBySql, linkedRequirementNameMap))
                 .toList();
     }
 
@@ -267,7 +280,8 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
      */
     private PendingSqlRsp convertToRsp(PendingSql sql,
                                        Map<Integer, List<SqlEnvConfigRsp>> envByProject,
-                                       Map<Integer, List<SqlExecutionLog>> logsBySql) {
+                                       Map<Integer, List<SqlExecutionLog>> logsBySql,
+                                       Map<Integer, String> linkedRequirementNameMap) {
         PendingSqlRsp rsp = new PendingSqlRsp();
         BeanUtil.copyProperties(sql, rsp);
 
@@ -324,7 +338,45 @@ public class PendingSqlServiceImpl extends ServiceImpl<PendingSqlMapper, Pending
                     rsp.setExecutedEnv("");
                 });
 
+        // 填充关联需求名称
+        rsp.setLinkedRequirementName(linkedRequirementNameMap.getOrDefault(sql.getId(), null));
+
         return rsp;
+    }
+
+    /**
+     * 批量构建 sqlId -> 关联需求名称 的映射
+     */
+    private Map<Integer, String> buildLinkedRequirementNameMap(List<Integer> sqlIds) {
+        if (sqlIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<WorkItemLink> links = workItemLinkMapper.selectByLinkTypeAndLinkIds("sql", sqlIds);
+        if (links.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        // linkId(sqlId) -> workItemId(requirementId)
+        Map<Integer, Integer> sqlToRequirementMap = links.stream()
+                .collect(Collectors.toMap(WorkItemLink::getLinkId, WorkItemLink::getWorkItemId, (a, b) -> a));
+
+        Set<Integer> requirementIds = new java.util.HashSet<>(sqlToRequirementMap.values());
+        if (requirementIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<Integer, String> requirementNameMap = requirementMapper.selectBatchIds(requirementIds).stream()
+                .collect(Collectors.toMap(Requirement::getId, Requirement::getName, (a, b) -> a));
+
+        Map<Integer, String> result = new HashMap<>();
+        for (Map.Entry<Integer, Integer> entry : sqlToRequirementMap.entrySet()) {
+            String name = requirementNameMap.get(entry.getValue());
+            if (name != null) {
+                result.put(entry.getKey(), name);
+            }
+        }
+        return result;
     }
 
     private String normalizeStatus(String status) {

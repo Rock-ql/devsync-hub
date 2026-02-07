@@ -58,4 +58,6 @@ export const requirementApi = {
   updateStatus: (payload: RequirementStatusUpdatePayload) => api.post('/requirement/status', payload),
   remove: (id: number) => api.post('/requirement/delete', { id }),
   link: (payload: RequirementLinkPayload) => api.post('/requirement/link', payload),
+  linked: (payload: { linkType: string; linkId: number }) =>
+    api.post<RequirementItem | null>('/requirement/linked', payload),
 }

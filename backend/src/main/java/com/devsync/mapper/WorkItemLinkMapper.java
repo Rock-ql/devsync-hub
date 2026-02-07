@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.List;
+
 /**
  * 工作项关联 Mapper
  *
@@ -55,4 +57,23 @@ public interface WorkItemLinkMapper extends BaseMapper<WorkItemLink> {
      */
     @Update("UPDATE work_item_link SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = #{id}")
     int restoreById(@Param("id") Integer id);
+
+    /**
+     * 根据关联类型和关联ID查询单条关联记录（用于反向查询SQL已关联的需求）
+     *
+     * @param linkType 关联类型
+     * @param linkId   关联ID
+     * @return 关联记录
+     */
+    @Select("SELECT * FROM work_item_link WHERE link_type = #{linkType} AND link_id = #{linkId} AND deleted_at IS NULL LIMIT 1")
+    WorkItemLink selectByLinkTypeAndLinkId(@Param("linkType") String linkType, @Param("linkId") Integer linkId);
+
+    /**
+     * 根据关联类型和关联ID列表批量查询关联记录（用于SQL列表填充需求名）
+     *
+     * @param linkType 关联类型
+     * @param linkIds  关联ID列表
+     * @return 关联记录列表
+     */
+    List<WorkItemLink> selectByLinkTypeAndLinkIds(@Param("linkType") String linkType, @Param("linkIds") List<Integer> linkIds);
 }

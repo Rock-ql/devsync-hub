@@ -56,14 +56,26 @@ export default function RequirementLinkDialog({
 
     let cancelled = false
     setIsLoadingRequirements(true)
-    Promise.all(iterations.map((iteration) => requirementApi.list(iteration.id)))
-      .then((results) => {
+
+    // 并行加载需求列表和已关联需求
+    const loadRequirements = Promise.all(iterations.map((iteration) => requirementApi.list(iteration.id)))
+    const loadLinked = sqlId
+      ? requirementApi.linked({ linkType: 'sql', linkId: sqlId })
+      : Promise.resolve(null)
+
+    Promise.all([loadRequirements, loadLinked])
+      .then(([results, linkedRequirement]) => {
         if (cancelled) return
         const nextGroups = iterations.map((iteration, index) => ({
           iteration,
           items: results[index] || [],
         })).filter((group) => group.items.length > 0)
         setGroups(nextGroups)
+
+        // 回显已关联的需求
+        if (linkedRequirement?.id) {
+          setSelectedRequirementId(String(linkedRequirement.id))
+        }
       })
       .catch((error: Error) => {
         if (!cancelled) {
@@ -80,7 +92,7 @@ export default function RequirementLinkDialog({
     return () => {
       cancelled = true
     }
-  }, [open, iterationPage])
+  }, [open, iterationPage, sqlId])
 
   const linkMutation = useMutation({
     mutationFn: () => requirementApi.link({

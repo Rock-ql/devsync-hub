@@ -51,6 +51,7 @@ interface PendingSql {
   executedAt: string
   executedEnv: string
   remark: string
+  linkedRequirementName?: string
 }
 
 interface Project {
@@ -389,6 +390,14 @@ export default function SqlManagement() {
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {sql.projectName} {sql.iterationName && `/ ${sql.iterationName}`}
+                          {sql.linkedRequirementName && (
+                            <>
+                              {' '}
+                              <Badge variant="soft" tone="info" className="ml-1">
+                                {sql.linkedRequirementName}
+                              </Badge>
+                            </>
+                          )}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -555,6 +564,9 @@ export default function SqlManagement() {
           }
         }}
         sqlId={linkSqlId || undefined}
+        onLinked={() => {
+          queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
+        }}
       />
 
       <Dialog open={isModalOpen} onOpenChange={handleModalChange}>

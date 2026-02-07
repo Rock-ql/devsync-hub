@@ -225,13 +225,15 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
             throw new BusinessException(400, "无效的关联类型");
         }
 
-        LambdaQueryWrapper<WorkItemLink> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(WorkItemLink::getWorkItemId, req.getRequirementId())
-                .eq(WorkItemLink::getLinkType, linkType)
-                .eq(WorkItemLink::getLinkId, req.getLinkId());
-
-        if (workItemLinkMapper.selectCount(wrapper) > 0) {
-            return;
+        // 一对一：先清除该 linkId 上已有的旧关联（如果存在且指向不同需求）
+        WorkItemLink existingLink = workItemLinkMapper.selectByLinkTypeAndLinkId(linkType, req.getLinkId());
+        if (existingLink != null) {
+            if (existingLink.getWorkItemId().equals(req.getRequirementId())) {
+                // 已关联到同一需求，无需操作
+                return;
+            }
+            // 删除旧关联，建立新关联
+            workItemLinkMapper.deleteById(existingLink.getId());
         }
 
         // 兼容：如果存在已软删除记录，则优先恢复，避免唯一约束冲突
@@ -250,6 +252,33 @@ public class RequirementServiceImpl extends ServiceImpl<RequirementMapper, Requi
         link.setLinkType(linkType);
         link.setLinkId(req.getLinkId());
         workItemLinkMapper.insert(link);
+    }
+
+    @Override
+    public RequirementRsp getLinkedRequirement(String linkType, Integer linkId) {
+        log.info("[需求管理] 查询已关联需求，linkType={}, linkId={}", linkType, linkId);
+
+        WorkItemLink link = workItemLinkMapper.selectByLinkTypeAndLinkId(linkType, linkId);
+        if (link == null) {
+            log.info("[需求管理] 未找到关联记录，linkType={}, linkId={}", linkType, linkId);
+            return null;
+        }
+
+        Requirement requirement = requirementMapper.selectById(link.getWorkItemId());
+        if (requirement == null) {
+            log.warn("[需求管理] 关联的需求不存在，workItemId={}", link.getWorkItemId());
+            return null;
+        }
+
+        RequirementRsp rsp = new RequirementRsp();
+        BeanUtil.copyProperties(requirement, rsp);
+
+        RequirementStatusEnum statusEnum = RequirementStatusEnum.getByCode(requirement.getStatus());
+        if (statusEnum != null) {
+            rsp.setStatusDesc(statusEnum.getDesc());
+        }
+
+        return rsp;
     }
 
     private void syncProjects(Integer requirementId, List<Integer> projectIds) {

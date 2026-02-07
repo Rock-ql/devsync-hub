@@ -68,4 +68,7 @@ public class PendingSqlRsp {
 
     @Schema(description = "更新时间")
     private LocalDateTime updatedAt;
+
+    @Schema(description = "关联的需求名称")
+    private String linkedRequirementName;
 }

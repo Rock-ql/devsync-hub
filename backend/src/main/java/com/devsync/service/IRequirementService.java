@@ -60,4 +60,13 @@ public interface IRequirementService {
      * @param req 请求参数
      */
     void updateStatus(RequirementStatusUpdateReq req);
+
+    /**
+     * 根据关联类型和关联ID查询已关联的需求
+     *
+     * @param linkType 关联类型（如 sql、commit）
+     * @param linkId   关联目标ID
+     * @return 已关联的需求，未关联时返回 null
+     */
+    RequirementRsp getLinkedRequirement(String linkType, Integer linkId);
 }

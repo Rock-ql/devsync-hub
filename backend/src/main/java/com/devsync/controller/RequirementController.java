@@ -5,6 +5,7 @@ import com.devsync.common.exception.BusinessException;
 import com.devsync.common.result.Result;
 import com.devsync.dto.req.RequirementAddReq;
 import com.devsync.dto.req.RequirementDeleteReq;
+import com.devsync.dto.req.RequirementLinkedReq;
 import com.devsync.dto.req.RequirementLinkReq;
 import com.devsync.dto.req.RequirementListReq;
 import com.devsync.dto.req.RequirementStatusUpdateReq;
@@ -122,6 +123,21 @@ public class RequirementController {
                 return Result.error(businessException.getCode(), businessException.getMessage());
             }
             return Result.error("需求状态更新失败");
+        }
+    }
+
+    @PostMapping("/linked")
+    @Operation(summary = "查询已关联的需求", description = "根据关联类型和关联ID查询已关联的需求，如查询某个SQL已关联的需求")
+    public Result<RequirementRsp> linked(@Valid @RequestBody RequirementLinkedReq req) {
+        try {
+            RequirementRsp rsp = requirementService.getLinkedRequirement(req.getLinkType(), req.getLinkId());
+            return Result.success(rsp);
+        } catch (Exception e) {
+            log.error("[需求管理] 查询已关联需求失败，参数: {}", JSON.toJSONString(req), e);
+            if (e instanceof BusinessException businessException) {
+                return Result.error(businessException.getCode(), businessException.getMessage());
+            }
+            return Result.error("查询已关联需求失败");
         }
     }
 }
