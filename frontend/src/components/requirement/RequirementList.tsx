@@ -5,7 +5,7 @@ import { requirementApi, RequirementItem } from '@/api/requirement'
 import RequirementDialog from '@/components/requirement/RequirementDialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 
 interface ProjectOption {
@@ -173,15 +173,18 @@ export default function RequirementList({ iterationId, iterationName, projects }
                 <span className="text-muted-foreground">状态：</span>
                 <Select
                   value={item.status || 'presented'}
-                  disabled={statusMutation.isPending}
-                  onChange={(e) => statusMutation.mutate({ id: item.id, status: e.target.value })}
-                  className="h-9 max-w-[180px] text-xs"
+                  onValueChange={(value) => statusMutation.mutate({ id: item.id, status: value })}
                 >
-                  {getAdjacentStatuses(item.status).map((status) => (
-                    <option key={status.code} value={status.code}>
-                      {status.desc}
-                    </option>
-                  ))}
+                  <SelectTrigger size="sm" className="max-w-[180px]" disabled={statusMutation.isPending}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getAdjacentStatuses(item.status).map((status) => (
+                      <SelectItem key={status.code} value={status.code}>
+                        {status.desc}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
             </div>

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import RequirementList from '@/components/requirement/RequirementList'
 
@@ -218,13 +218,17 @@ export default function Iterations() {
                         <td className="px-6 py-4">
                           <Select
                             value={iteration.status}
-                            onChange={(e) => statusMutation.mutate({ id: iteration.id, status: e.target.value })}
-                            className={`h-10 text-xs ${statusStyles[iteration.status]}`}
+                            onValueChange={(value) => statusMutation.mutate({ id: iteration.id, status: value })}
                           >
-                            <option value="planning">规划中</option>
-                            <option value="developing">开发中</option>
-                            <option value="testing">测试中</option>
-                            <option value="released">已上线</option>
+                            <SelectTrigger size="md" className={statusStyles[iteration.status]}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="planning">规划中</SelectItem>
+                              <SelectItem value="developing">开发中</SelectItem>
+                              <SelectItem value="testing">测试中</SelectItem>
+                              <SelectItem value="released">已上线</SelectItem>
+                            </SelectContent>
                           </Select>
                         </td>
                         <td className="px-6 py-4 text-sm text-muted-foreground">
@@ -350,13 +354,17 @@ export default function Iterations() {
                 <div className="flex items-center justify-between">
                   <Select
                     value={iteration.status}
-                    onChange={(e) => statusMutation.mutate({ id: iteration.id, status: e.target.value })}
-                    className={`h-10 text-xs ${statusStyles[iteration.status]}`}
+                    onValueChange={(value) => statusMutation.mutate({ id: iteration.id, status: value })}
                   >
-                    <option value="planning">规划中</option>
-                    <option value="developing">开发中</option>
-                    <option value="testing">测试中</option>
-                    <option value="released">已上线</option>
+                    <SelectTrigger size="md" className={statusStyles[iteration.status]}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="planning">规划中</SelectItem>
+                      <SelectItem value="developing">开发中</SelectItem>
+                      <SelectItem value="testing">测试中</SelectItem>
+                      <SelectItem value="released">已上线</SelectItem>
+                    </SelectContent>
                   </Select>
                   <div className="flex items-center gap-2">
                     <Button

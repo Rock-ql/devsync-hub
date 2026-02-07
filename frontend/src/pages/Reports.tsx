@@ -25,7 +25,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
@@ -672,12 +672,14 @@ export default function Reports() {
           <form onSubmit={handleGenerate} className="space-y-4">
             <div className="space-y-2">
               <Label>报告类型</Label>
-              <Select
-                value={generateForm.type}
-                onChange={(e) => setGenerateForm({ ...generateForm, type: e.target.value })}
-              >
-                <option value="daily">日报</option>
-                <option value="weekly">周报</option>
+              <Select value={generateForm.type} onValueChange={(value) => setGenerateForm({ ...generateForm, type: value })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">日报</SelectItem>
+                  <SelectItem value="weekly">周报</SelectItem>
+                </SelectContent>
               </Select>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">

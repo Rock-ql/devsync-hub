@@ -4,7 +4,7 @@ import api, { PageResult } from '@/api'
 import { requirementApi, RequirementItem } from '@/api/requirement'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 
 interface IterationItem {
@@ -122,17 +122,22 @@ export default function RequirementLinkDialog({
           {isLoadingRequirements ? (
             <p className="text-sm text-muted-foreground">正在加载需求...</p>
           ) : groupedOptions.length ? (
-            <Select value={selectedRequirementId} onChange={(e) => setSelectedRequirementId(e.target.value)}>
-              <option value="">请选择需求</option>
-              {groupedOptions.map((group) => (
-                <optgroup key={group.iteration.id} label={group.iteration.name}>
-                  {group.items.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
+            <Select value={selectedRequirementId || undefined} onValueChange={setSelectedRequirementId}>
+              <SelectTrigger>
+                <SelectValue placeholder="请选择需求" />
+              </SelectTrigger>
+              <SelectContent>
+                {groupedOptions.map((group) => (
+                  <SelectGroup key={group.iteration.id}>
+                    <SelectLabel>{group.iteration.name}</SelectLabel>
+                    {group.items.map((item) => (
+                      <SelectItem key={item.id} value={String(item.id)}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
             </Select>
           ) : (
             <p className="text-sm text-muted-foreground">暂无需求可关联</p>

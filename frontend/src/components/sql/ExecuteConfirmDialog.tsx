@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 
 interface ExecuteConfirmDialogProps {
@@ -55,20 +55,21 @@ export function ExecuteConfirmDialog({
           {!isDetail && envOptions?.length ? (
             <div className="space-y-2">
               <Label>执行环境</Label>
-              <Select
-                value={selectedEnvCode || ''}
-                onChange={(e) => onEnvChange?.(e.target.value)}
-              >
-                <option value="" disabled>请选择环境</option>
-                {envOptions.map((option) => (
-                  <option
-                    key={option.envCode}
-                    value={option.envCode}
-                    disabled={option.executed}
-                  >
-                    {option.envName}
-                  </option>
-                ))}
+              <Select value={selectedEnvCode || undefined} onValueChange={(value) => onEnvChange?.(value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择环境" />
+                </SelectTrigger>
+                <SelectContent>
+                  {envOptions.map((option) => (
+                    <SelectItem
+                      key={option.envCode}
+                      value={option.envCode}
+                      disabled={option.executed}
+                    >
+                      {option.envName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
           ) : null}

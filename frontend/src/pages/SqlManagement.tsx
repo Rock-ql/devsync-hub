@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
@@ -280,28 +280,32 @@ export default function SqlManagement() {
         <CardContent className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
             <Label>项目筛选</Label>
-            <Select
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-            >
-              <option value="">全部项目</option>
-              {projects?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+            <Select value={selectedProjectId || 'all'} onValueChange={(value) => setSelectedProjectId(value === 'all' ? '' : value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="全部项目" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部项目</SelectItem>
+                {projects?.map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
             <Label>状态筛选</Label>
-            <Select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-            >
-              <option value="">全部状态</option>
-              <option value="pending">待执行</option>
-              <option value="partial">部分执行</option>
-              <option value="completed">全部完成</option>
+            <Select value={selectedStatus || 'all'} onValueChange={(value) => setSelectedStatus(value === 'all' ? '' : value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="全部状态" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="pending">待执行</SelectItem>
+                <SelectItem value="partial">部分执行</SelectItem>
+                <SelectItem value="completed">全部完成</SelectItem>
+              </SelectContent>
             </Select>
           </div>
         </CardContent>
@@ -578,17 +582,17 @@ export default function SqlManagement() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>所属项目 *</Label>
-                <Select
-                  value={formData.projectId}
-                  onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
-                  required
-                >
-                  <option value="">请选择项目</option>
-                  {projects?.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
+                <Select value={formData.projectId ? String(formData.projectId) : undefined} onValueChange={(value) => setFormData({ ...formData, projectId: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="请选择项目" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects?.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">

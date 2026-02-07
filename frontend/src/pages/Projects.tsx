@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -501,19 +501,17 @@ export default function Projects() {
               </div>
               <div className="space-y-2">
                 <Label>默认分支</Label>
-                <Select
-                  value={formData.gitlabBranch}
-                  onChange={(e) => setFormData({ ...formData, gitlabBranch: e.target.value })}
-                  disabled={branchQuery.isFetching}
-                >
-                  {branchOptions.length === 0 && (
-                    <option value="">请选择分支</option>
-                  )}
-                  {branchOptions.map((branch) => (
-                    <option key={branch} value={branch}>
-                      {branch}
-                    </option>
-                  ))}
+                <Select value={formData.gitlabBranch || undefined} onValueChange={(value) => setFormData({ ...formData, gitlabBranch: value })}>
+                  <SelectTrigger disabled={branchQuery.isFetching}>
+                    <SelectValue placeholder="请选择分支" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branchOptions.map((branch) => (
+                      <SelectItem key={branch} value={branch}>
+                        {branch}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
                 {branchQuery.isFetching && (
                   <p className="text-xs text-muted-foreground">正在拉取分支列表...</p>

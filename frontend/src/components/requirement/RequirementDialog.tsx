@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 
 interface ProjectOption {
@@ -156,11 +156,16 @@ export default function RequirementDialog({
             </div>
             <div className="space-y-2">
               <Label>当前环境</Label>
-              <Select value={environment} onChange={(e) => setEnvironment(e.target.value)}>
-                <option value="">未填写</option>
-                <option value="dev">dev</option>
-                <option value="smoke">smoke</option>
-                <option value="prod">prod</option>
+              <Select value={environment || 'none'} onValueChange={(value) => setEnvironment(value === 'none' ? '' : value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="未填写" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">未填写</SelectItem>
+                  <SelectItem value="dev">dev</SelectItem>
+                  <SelectItem value="smoke">smoke</SelectItem>
+                  <SelectItem value="prod">prod</SelectItem>
+                </SelectContent>
               </Select>
             </div>
           </div>
@@ -197,12 +202,17 @@ export default function RequirementDialog({
 
           <div className="space-y-2">
             <Label>需求状态</Label>
-            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-              {editableStatusOptions.map((item) => (
-                <option key={item.code} value={item.code}>
-                  {item.desc}
-                </option>
-              ))}
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {editableStatusOptions.map((item) => (
+                  <SelectItem key={item.code} value={item.code}>
+                    {item.desc}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
 
