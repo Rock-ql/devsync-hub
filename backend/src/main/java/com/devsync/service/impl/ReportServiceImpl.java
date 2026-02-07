@@ -270,7 +270,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                 .orderByDesc(Requirement::getUpdatedAt));
 
         if (allRequirements.isEmpty()) {
-            return renderFlat(displayCommits, rule);
+            return renderDailyOtherWorkOnly(displayCommits, rule, loadProjectNameMap(commits));
         }
 
         List<Requirement> codedRequirements = allRequirements.stream()
@@ -278,7 +278,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                 .toList();
 
         if (codedRequirements.isEmpty()) {
-            return renderFlat(displayCommits, rule);
+            return renderDailyOtherWorkOnly(displayCommits, rule, loadProjectNameMap(commits));
         }
 
         Map<Integer, Set<Integer>> requirementProjectIds = loadRequirementProjectIds(codedRequirements);
@@ -314,7 +314,7 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
         boolean hasMatchedRequirementCommits = !displayRequirementCommits.isEmpty();
         if (!hasMatchedRequirementCommits) {
-            return renderFlat(displayCommits, rule);
+            return renderDailyOtherWorkOnly(displayCommits, rule, projectNameMap);
         }
 
         StringBuilder sb = new StringBuilder();
@@ -351,6 +351,15 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
         sb.append("## 其他工作:\n");
         appendOtherWorkByProject(sb, displayOtherCommits, rule, projectNameMap);
 
+        return sb.toString().trim();
+    }
+
+    private String renderDailyOtherWorkOnly(List<GitCommit> commits,
+                                            TemplateRule rule,
+                                            Map<Integer, String> projectNameMap) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 其他工作:\n");
+        appendOtherWorkByProject(sb, commits, rule, projectNameMap);
         return sb.toString().trim();
     }
 
