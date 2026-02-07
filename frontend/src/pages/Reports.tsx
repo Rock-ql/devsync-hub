@@ -17,7 +17,7 @@ import {
   startOfWeek,
 } from 'date-fns'
 import { Check, ChevronLeft, ChevronRight, Copy, Pencil, Sparkles, Trash2 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -57,6 +57,106 @@ type PanelState =
   | { mode: 'weekly'; week: WeekRow }
 
 const WEEK_DAYS = ['一', '二', '三', '四', '五', '六', '日']
+
+const MARKDOWN_COMPONENTS: Components = {
+  h1: ({ node, className, ...props }) => (
+    <h1 className={cn('mt-8 text-3xl font-display text-foreground', className)} {...props} />
+  ),
+  h2: ({ node, className, ...props }) => (
+    <h2 className={cn('mt-7 text-2xl font-display text-foreground', className)} {...props} />
+  ),
+  h3: ({ node, className, ...props }) => (
+    <h3 className={cn('mt-6 text-xl font-display text-foreground', className)} {...props} />
+  ),
+  p: ({ node, className, ...props }) => (
+    <p className={cn('my-3 leading-7 text-muted-foreground', className)} {...props} />
+  ),
+  ol: ({ node, className, ...props }) => (
+    <ol className={cn('my-3 list-decimal space-y-2 pl-6 text-muted-foreground', className)} {...props} />
+  ),
+  ul: ({ node, className, ...props }) => (
+    <ul className={cn('my-3 list-disc space-y-2 pl-6 text-muted-foreground', className)} {...props} />
+  ),
+  li: ({ node, className, ...props }) => (
+    <li className={cn('leading-7', className)} {...props} />
+  ),
+  blockquote: ({ node, className, ...props }) => (
+    <blockquote
+      className={cn('my-4 border-l-2 border-[hsl(var(--accent))]/40 pl-4 text-muted-foreground', className)}
+      {...props}
+    />
+  ),
+  pre: ({ node, className, ...props }) => (
+    <pre
+      className={cn('my-4 overflow-x-auto rounded-xl border border-border bg-muted/60 p-4 text-sm text-foreground', className)}
+      {...props}
+    />
+  ),
+  code: ({ node, className, ...props }) => (
+    <code className={cn('rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground', className)} {...props} />
+  ),
+}
+
+function normalizeReportMarkdown(content: string): string {
+  if (!content) {
+    return ''
+  }
+
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  const normalizedLines: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      normalizedLines.push('')
+      continue
+    }
+
+    const parentMatch = trimmed.match(/^(\d+)\.\s*(.+)$/)
+    const hasInlineChildren = /\b\d+\.\d+\s+/.test(trimmed)
+    if (!parentMatch || !hasInlineChildren) {
+      // 处理独立的 X.Y 格式子项行（如 "1.1 添加订单查询接口" 或 "1.1. 添加订单查询接口"）
+      // 这种格式不是合法 Markdown 列表语法，会导致渲染时挤压成一段
+      const standaloneChildMatch = trimmed.match(/^\d+\.\d+\.?\s+(.+)$/)
+      if (standaloneChildMatch) {
+        const itemText = standaloneChildMatch[1].trim()
+        if (itemText) {
+          normalizedLines.push(`   1. ${itemText}`)
+          continue
+        }
+      }
+      normalizedLines.push(line)
+      continue
+    }
+
+    const parentIndex = parentMatch[1]
+    const parentPayload = parentMatch[2]
+    const childIndex = parentPayload.search(/\b\d+\.\d+\s+/)
+    if (childIndex <= 0) {
+      normalizedLines.push(line)
+      continue
+    }
+
+    const parentTitle = parentPayload.slice(0, childIndex).trim()
+    const childPayload = parentPayload.slice(childIndex).trim()
+    const childSegments = childPayload.split(/(?=\d+\.\d+\s+)/).map((segment) => segment.trim())
+
+    if (!parentTitle || childSegments.length === 0) {
+      normalizedLines.push(line)
+      continue
+    }
+
+    normalizedLines.push(`${parentIndex}. ${parentTitle}`)
+    for (const segment of childSegments) {
+      const item = segment.replace(/^\d+\.\d+\s+/, '').trim()
+      if (item) {
+        normalizedLines.push(`   1. ${item}`)
+      }
+    }
+  }
+
+  return normalizedLines.join('\n')
+}
 
 export default function Reports() {
   const queryClient = useQueryClient()
@@ -139,6 +239,11 @@ export default function Reports() {
     queryFn: () => api.get(`/report/detail/${selectedReportId}`),
     enabled: selectedReportId !== null,
   })
+
+  const normalizedReportContent = useMemo(
+    () => normalizeReportMarkdown(selectedReport?.content ?? ''),
+    [selectedReport?.content],
+  )
 
   const generateMutation = useMutation({
     mutationFn: (data: typeof generateForm) => api.post<Report>('/report/generate', data),
@@ -541,7 +646,7 @@ export default function Reports() {
                       </div>
                     </div>
                     <div className="markdown text-sm text-foreground">
-                      <ReactMarkdown>{selectedReport.content}</ReactMarkdown>
+                      <ReactMarkdown components={MARKDOWN_COMPONENTS}>{normalizedReportContent}</ReactMarkdown>
                     </div>
                   </>
                 )}

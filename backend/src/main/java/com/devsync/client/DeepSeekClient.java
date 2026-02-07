@@ -224,6 +224,55 @@ public class DeepSeekClient {
     }
 
     /**
+     * 生成基于当周日报聚合的周报内容
+     *
+     * @param weeklyDailySummary 当周日报聚合信息（按项目）
+     * @param template           周报模板
+     * @return 生成的周报内容
+     */
+    public String generateWeeklyReportByDailyReports(String weeklyDailySummary, String template) {
+        String systemPrompt = """
+            你是一个专业的软件开发周报生成助手。
+
+            任务要求：
+            1. 严格基于输入内容输出，不编造不存在的项目和工作。
+            2. 周报中的"详细工作小点"必须挂在"项目名"下面，不能挂在需求下面。
+            3. 如果输入中存在需求信息，可在项目下概述，但不能把小点放到需求层级。
+            4. 输出结构优先按项目分组，每个项目下列出本周工作小点。
+            5. 模板仅作为格式参考，禁止拷贝模板中的历史业务条目。
+            6. 一级和二级条目都使用阿拉伯数字编号。
+            7. 若输入已将多个仓库/模块归并到同一项目名，输出时必须保持该归并，不可再拆分为多个项目。
+
+            Markdown格式强制要求：
+            - 禁止使用 1.1、1.2、2.1 这种小数点编号格式，这不是合法的Markdown语法。
+            - 二级条目必须使用缩进3个空格 + 阿拉伯数字编号的标准Markdown嵌套列表格式。
+            - 正确示例：
+              1. 项目A
+                 1. 完成功能X开发
+                 2. 修复问题Y
+              2. 项目B
+                 1. 优化模块Z性能
+            """;
+
+        String userPrompt = String.format("""
+            请根据以下“当周日报汇总信息”和模板生成周报。
+
+            强制要求：
+            - 详细工作小点必须放在项目名下面。
+            - 不允许把详细工作小点挂在需求标题下。
+            - 只能使用输入中已有的项目与工作内容。
+
+            【当周日报汇总信息】
+            %s
+
+            【周报模板】
+            %s
+            """, weeklyDailySummary, template);
+
+        return chat(systemPrompt, userPrompt);
+    }
+
+    /**
      * 测试API连接
      *
      * @return 是否连接成功

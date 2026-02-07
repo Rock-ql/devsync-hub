@@ -78,9 +78,13 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
     private static final String DAILY_TEMPLATE_KEY = "report.template.daily";
     private static final String WEEKLY_TEMPLATE_KEY = "report.template.weekly";
+    private static final String WEEKLY_PROJECT_ALIAS_RULES_KEY = "report.weekly.project.alias.map";
     private static final String GIT_AUTHOR_EMAIL_KEY = "git.author.email";
     private static final String GIT_GITLAB_TOKEN_KEY = "git.gitlab.token";
     private static final Pattern REQUIREMENT_CODE_PATTERN = Pattern.compile("([A-Za-z]+-\\d+)");
+    private static final Pattern BRACKET_PROJECT_PATTERN = Pattern.compile(".*【([^】]+)】.*");
+    private static final Pattern MARKDOWN_PROJECT_PATTERN = Pattern.compile("^###\\s*(?:项目[:：])?(.+)$");
+    private static final Pattern NUMBERED_LIST_PATTERN = Pattern.compile("^\\d+\\.\\s*(.+)$");
     private static final long NEAREST_ANCHOR_MAX_MINUTES = 30L;
 
     @Override
@@ -152,6 +156,16 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
 
         TemplateRule rule = parseTemplateRule(templateContent);
         String commitsText = buildCommitSummary(allCommits, rule, reportType);
+        String weeklyDailySummary = "";
+        if (reportType == ReportTypeEnum.WEEKLY) {
+            weeklyDailySummary = buildWeeklySummaryFromDailyReports(req.getStartDate(), req.getEndDate(), rule);
+            if (StrUtil.isNotBlank(weeklyDailySummary)) {
+                commitsText = weeklyDailySummary;
+                log.info("[报告生成] 周报使用当周日报作为主要输入，日期范围: {} - {}", req.getStartDate(), req.getEndDate());
+            } else {
+                log.info("[报告生成] 周报未获取到可用日报，回退到Git提交记录");
+            }
+        }
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
         String defaultTitle = reportType.getDesc() + " - " + req.getStartDate().format(formatter);
@@ -181,7 +195,11 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
                 content = renderTemplate(templateContent, req, commitsText, title);
             } else {
                 try {
-                    content = deepSeekClient.generateReport(commitsText, templateContent, req.getType());
+                    if (StrUtil.isNotBlank(weeklyDailySummary)) {
+                        content = deepSeekClient.generateWeeklyReportByDailyReports(commitsText, templateContent);
+                    } else {
+                        content = deepSeekClient.generateReport(commitsText, templateContent, req.getType());
+                    }
                 } catch (Exception e) {
                     log.error("[报告生成] AI生成失败，使用模板内容", e);
                     content = renderTemplate(templateContent, req, commitsText, title);
@@ -254,6 +272,466 @@ public class ReportServiceImpl extends ServiceImpl<ReportMapper, Report> impleme
             return renderGrouped(commits, projectNameMap, rule);
         }
         return renderFlat(commits, rule);
+    }
+
+    private String buildWeeklySummaryFromDailyReports(LocalDate startDate,
+                                                      LocalDate endDate,
+                                                      TemplateRule rule) {
+        List<Report> dailyReports = loadWeeklyDailyReports(startDate, endDate);
+        if (dailyReports.isEmpty()) {
+            return "";
+        }
+
+        Map<String, Set<String>> projectWorkMap = new LinkedHashMap<>();
+        for (Report dailyReport : dailyReports) {
+            Map<String, Set<String>> dayWorkMap = extractProjectWorkMapFromDailyReport(dailyReport.getContent());
+            mergeProjectWorkMap(projectWorkMap, dayWorkMap);
+        }
+
+        projectWorkMap = mergeWeeklyProjectAliases(projectWorkMap);
+        projectWorkMap = filterWeeklyProjectWorkMap(projectWorkMap);
+
+        if (projectWorkMap.isEmpty()) {
+            return "";
+        }
+
+        return renderWeeklyProjectWorkSummary(projectWorkMap, rule);
+    }
+
+    private List<Report> loadWeeklyDailyReports(LocalDate startDate, LocalDate endDate) {
+        LambdaQueryWrapper<Report> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Report::getType, ReportTypeEnum.DAILY.getCode())
+                .ge(Report::getStartDate, startDate)
+                .le(Report::getStartDate, endDate)
+                .orderByAsc(Report::getStartDate)
+                .orderByDesc(Report::getCreatedAt);
+
+        List<Report> reports = reportMapper.selectList(wrapper);
+        if (reports == null || reports.isEmpty()) {
+            return List.of();
+        }
+
+        Map<LocalDate, Report> latestByDay = new LinkedHashMap<>();
+        for (Report report : reports) {
+            if (report == null || report.getStartDate() == null) {
+                continue;
+            }
+            latestByDay.putIfAbsent(report.getStartDate(), report);
+        }
+        return new java.util.ArrayList<>(latestByDay.values());
+    }
+
+    private Map<String, Set<String>> extractProjectWorkMapFromDailyReport(String dailyContent) {
+        Map<String, Set<String>> result = new LinkedHashMap<>();
+        if (StrUtil.isBlank(dailyContent)) {
+            return result;
+        }
+
+        String section = "";
+        List<String> currentProjects = List.of();
+        String[] lines = dailyContent.split("\\n");
+        for (String rawLine : lines) {
+            String trimmed = StrUtil.trim(rawLine);
+            if (StrUtil.isBlank(trimmed)) {
+                continue;
+            }
+
+            if (containsAny(trimmed, "其他工作")) {
+                section = "other";
+                currentProjects = List.of();
+                continue;
+            }
+            if (containsAny(trimmed, "需求工作", "今日工作内容")) {
+                section = "requirement";
+                currentProjects = List.of();
+                continue;
+            }
+
+            Matcher markdownProjectMatcher = MARKDOWN_PROJECT_PATTERN.matcher(trimmed);
+            if (markdownProjectMatcher.matches() && !trimmed.contains("【")) {
+                currentProjects = parseProjectNames(markdownProjectMatcher.group(1));
+                ensureProjectEntries(result, currentProjects);
+                continue;
+            }
+
+            if (trimmed.contains("【") && trimmed.contains("】")) {
+                Matcher bracketMatcher = BRACKET_PROJECT_PATTERN.matcher(trimmed);
+                if (bracketMatcher.matches()) {
+                    currentProjects = parseProjectNames(bracketMatcher.group(1));
+                    ensureProjectEntries(result, currentProjects);
+                    continue;
+                }
+            }
+
+            String itemText = extractListItemText(trimmed);
+            if (StrUtil.isBlank(itemText)) {
+                continue;
+            }
+
+            int leadingSpaces = countLeadingSpaces(rawLine);
+            if ("other".equals(section) && leadingSpaces <= 3 && isLikelyProjectName(itemText)) {
+                currentProjects = parseProjectNames(itemText);
+                ensureProjectEntries(result, currentProjects);
+                continue;
+            }
+
+            if (currentProjects.isEmpty()) {
+                continue;
+            }
+
+            String normalizedItem = normalizeWeeklyWorkItem(itemText);
+            if (StrUtil.isBlank(normalizedItem) || isLikelyProjectName(normalizedItem)) {
+                continue;
+            }
+
+            for (String projectName : currentProjects) {
+                result.computeIfAbsent(projectName, key -> new LinkedHashSet<>()).add(normalizedItem);
+            }
+        }
+
+        return result;
+    }
+
+    private void mergeProjectWorkMap(Map<String, Set<String>> target,
+                                     Map<String, Set<String>> source) {
+        if (source == null || source.isEmpty()) {
+            return;
+        }
+
+        for (Map.Entry<String, Set<String>> entry : source.entrySet()) {
+            if (StrUtil.isBlank(entry.getKey())) {
+                continue;
+            }
+            Set<String> workItems = entry.getValue();
+            if (workItems == null || workItems.isEmpty()) {
+                target.computeIfAbsent(entry.getKey(), key -> new LinkedHashSet<>());
+                continue;
+            }
+            target.computeIfAbsent(entry.getKey(), key -> new LinkedHashSet<>()).addAll(workItems);
+        }
+    }
+
+    private Map<String, Set<String>> mergeWeeklyProjectAliases(Map<String, Set<String>> source) {
+        if (source == null || source.isEmpty()) {
+            return source;
+        }
+
+        Map<String, String> aliasMap = loadWeeklyProjectAliasMap();
+        Map<String, String> normalizedDisplayMap = new HashMap<>();
+        Map<String, Set<String>> merged = new LinkedHashMap<>();
+
+        for (Map.Entry<String, Set<String>> entry : source.entrySet()) {
+            String projectName = StrUtil.trimToEmpty(entry.getKey());
+            if (StrUtil.isBlank(projectName)) {
+                continue;
+            }
+
+            String canonicalProjectName = resolveWeeklyCanonicalProjectName(projectName, aliasMap, normalizedDisplayMap);
+            Set<String> items = entry.getValue();
+            if (items == null || items.isEmpty()) {
+                merged.computeIfAbsent(canonicalProjectName, key -> new LinkedHashSet<>());
+                continue;
+            }
+            merged.computeIfAbsent(canonicalProjectName, key -> new LinkedHashSet<>()).addAll(items);
+        }
+
+        return merged;
+    }
+
+    private Map<String, Set<String>> filterWeeklyProjectWorkMap(Map<String, Set<String>> source) {
+        if (source == null || source.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+
+        Map<String, Set<String>> filtered = new LinkedHashMap<>();
+        for (Map.Entry<String, Set<String>> entry : source.entrySet()) {
+            String projectName = StrUtil.trimToEmpty(entry.getKey());
+            if (StrUtil.isBlank(projectName) || isWeeklyPlaceholderProjectName(projectName)) {
+                continue;
+            }
+
+            Set<String> rawItems = entry.getValue();
+            if (rawItems == null || rawItems.isEmpty()) {
+                continue;
+            }
+
+            LinkedHashSet<String> validItems = new LinkedHashSet<>();
+            for (String item : rawItems) {
+                String normalizedItem = normalizeWeeklyWorkItem(item);
+                if (StrUtil.isBlank(normalizedItem)) {
+                    continue;
+                }
+                validItems.add(normalizedItem);
+            }
+
+            if (!validItems.isEmpty()) {
+                filtered.put(projectName, validItems);
+            }
+        }
+
+        return filtered;
+    }
+
+    private boolean isWeeklyPlaceholderProjectName(String projectName) {
+        return containsAny(projectName, "暂无提交记录", "未关联项目", "未知项目");
+    }
+
+    private Map<String, String> loadWeeklyProjectAliasMap() {
+        Map<String, String> aliasMap = new HashMap<>();
+
+        registerWeeklyProjectAlias(aliasMap, "全局搜索", "全局搜索");
+        registerWeeklyProjectAlias(aliasMap, "全局搜索", "小鹰管家PC端");
+        registerWeeklyProjectAlias(aliasMap, "全局搜索", "小鹰管家pc端");
+        registerWeeklyProjectAlias(aliasMap, "全局搜索", "mod_junified_query");
+
+        String aliasSetting = systemSettingService.getSetting(WEEKLY_PROJECT_ALIAS_RULES_KEY);
+        if (StrUtil.isBlank(aliasSetting)) {
+            return aliasMap;
+        }
+
+        try {
+            Map<String, Object> configuredRules = JSON.parseObject(aliasSetting,
+                    new TypeReference<Map<String, Object>>() {});
+            if (configuredRules == null || configuredRules.isEmpty()) {
+                return aliasMap;
+            }
+
+            for (Map.Entry<String, Object> entry : configuredRules.entrySet()) {
+                String canonicalProject = StrUtil.trimToEmpty(entry.getKey());
+                if (StrUtil.isBlank(canonicalProject)) {
+                    continue;
+                }
+
+                registerWeeklyProjectAlias(aliasMap, canonicalProject, canonicalProject);
+
+                Object value = entry.getValue();
+                if (value instanceof List<?> aliases) {
+                    for (Object alias : aliases) {
+                        registerWeeklyProjectAlias(aliasMap, canonicalProject, String.valueOf(alias));
+                    }
+                } else if (value instanceof String aliasText) {
+                    registerWeeklyProjectAlias(aliasMap, canonicalProject, aliasText);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[报告生成] 解析项目别名归并规则失败，settingKey={}", WEEKLY_PROJECT_ALIAS_RULES_KEY, e);
+        }
+
+        return aliasMap;
+    }
+
+    private void registerWeeklyProjectAlias(Map<String, String> aliasMap,
+                                            String canonicalProject,
+                                            String aliasProject) {
+        String canonical = StrUtil.trimToEmpty(canonicalProject);
+        String alias = StrUtil.trimToEmpty(aliasProject);
+        if (StrUtil.isBlank(canonical) || StrUtil.isBlank(alias)) {
+            return;
+        }
+
+        String normalizedAlias = normalizeProjectNameForMerge(alias);
+        if (StrUtil.isBlank(normalizedAlias)) {
+            return;
+        }
+        aliasMap.put(normalizedAlias, canonical);
+    }
+
+    private String resolveWeeklyCanonicalProjectName(String projectName,
+                                                     Map<String, String> aliasMap,
+                                                     Map<String, String> normalizedDisplayMap) {
+        String normalizedProjectName = normalizeProjectNameForMerge(projectName);
+        String mapped = aliasMap.get(normalizedProjectName);
+        if (StrUtil.isNotBlank(mapped)) {
+            return mapped;
+        }
+
+        String existingDisplayName = normalizedDisplayMap.get(normalizedProjectName);
+        if (StrUtil.isNotBlank(existingDisplayName)) {
+            return existingDisplayName;
+        }
+
+        normalizedDisplayMap.put(normalizedProjectName, projectName);
+        return projectName;
+    }
+
+    private String normalizeProjectNameForMerge(String projectName) {
+        if (StrUtil.isBlank(projectName)) {
+            return "";
+        }
+        String normalized = StrUtil.trim(projectName).toLowerCase();
+        normalized = normalized.replaceAll("[\\s_\\-]", "");
+        return normalized;
+    }
+
+    private String buildWeeklySummaryFallbackFromDailyReports(List<Report> dailyReports) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 当周日报原文参考:\n");
+
+        for (Report dailyReport : dailyReports) {
+            if (dailyReport == null) {
+                continue;
+            }
+            String reportDate = dailyReport.getStartDate() == null
+                    ? "未知日期"
+                    : dailyReport.getStartDate().toString();
+            sb.append("### ").append(reportDate).append("\n");
+
+            String content = StrUtil.blankToDefault(dailyReport.getContent(), "").trim();
+            if (StrUtil.isBlank(content)) {
+                sb.append("- 暂无内容\n\n");
+                continue;
+            }
+            sb.append(content).append("\n\n");
+        }
+
+        return sb.toString().trim();
+    }
+
+    private String renderWeeklyProjectWorkSummary(Map<String, Set<String>> projectWorkMap,
+                                                  TemplateRule rule) {
+        if (projectWorkMap == null || projectWorkMap.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 当周日报汇总（按项目）:\n");
+
+        for (Map.Entry<String, Set<String>> entry : projectWorkMap.entrySet()) {
+            String projectName = entry.getKey();
+            Set<String> workItems = entry.getValue();
+
+            if (workItems == null || workItems.isEmpty()) {
+                continue;
+            }
+
+            sb.append("### 项目：").append(projectName).append("\n");
+
+            int index = 1;
+            for (String item : workItems) {
+                if (rule.numbered) {
+                    sb.append(index).append(". ").append(item).append("\n");
+                } else {
+                    sb.append("- ").append(item).append("\n");
+                }
+                index++;
+            }
+            sb.append("\n");
+        }
+
+        return sb.toString().trim();
+    }
+
+    private void ensureProjectEntries(Map<String, Set<String>> target,
+                                      List<String> projectNames) {
+        if (projectNames == null || projectNames.isEmpty()) {
+            return;
+        }
+        for (String projectName : projectNames) {
+            if (StrUtil.isNotBlank(projectName)) {
+                target.computeIfAbsent(projectName, key -> new LinkedHashSet<>());
+            }
+        }
+    }
+
+    private List<String> parseProjectNames(String rawProjectNames) {
+        if (StrUtil.isBlank(rawProjectNames)) {
+            return List.of();
+        }
+
+        String normalized = StrUtil.trim(rawProjectNames)
+                .replace("项目：", "")
+                .replace("项目:", "");
+        if (StrUtil.isBlank(normalized)) {
+            return List.of();
+        }
+
+        String[] parts = normalized.split("[/、,，]");
+        Set<String> names = new LinkedHashSet<>();
+        for (String part : parts) {
+            String projectName = StrUtil.trim(part);
+            if (StrUtil.isNotBlank(projectName)) {
+                names.add(projectName);
+            }
+        }
+        if (names.isEmpty() && StrUtil.isNotBlank(normalized)) {
+            names.add(normalized);
+        }
+        return names.stream().toList();
+    }
+
+    private String extractListItemText(String line) {
+        if (StrUtil.isBlank(line)) {
+            return "";
+        }
+
+        Matcher matcher = NUMBERED_LIST_PATTERN.matcher(line);
+        if (matcher.matches()) {
+            return StrUtil.trim(matcher.group(1));
+        }
+
+        if (line.startsWith("- ") || line.startsWith("* ")) {
+            return StrUtil.trim(line.substring(2));
+        }
+        return "";
+    }
+
+    private int countLeadingSpaces(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == ' ') {
+                count++;
+            } else {
+                break;
+            }
+        }
+        return count;
+    }
+
+    private boolean isLikelyProjectName(String text) {
+        String value = StrUtil.trimToEmpty(text);
+        if (StrUtil.isBlank(value)) {
+            return false;
+        }
+        if (value.length() > 24) {
+            return false;
+        }
+        if (value.matches(".*[\\[\\]（）()：:，,。；;].*")) {
+            return false;
+        }
+        return !containsAny(value, "需求", "工作", "状态", "环境", "新增", "修复", "优化", "支持", "添加", "更新", "回归", "排查");
+    }
+
+    private String normalizeWeeklyWorkItem(String rawItem) {
+        if (StrUtil.isBlank(rawItem)) {
+            return "";
+        }
+
+        String normalized = StrUtil.trim(rawItem);
+        normalized = normalized.replaceFirst("^\\[[^\\]]+\\]\\s*", "");
+        normalized = normalized.replaceFirst("（[A-Za-z0-9_@.\\- ]+）$", "");
+        normalized = normalized.replaceFirst("\\([A-Za-z0-9_@.\\- ]+\\)$", "");
+        normalized = StrUtil.trim(normalized);
+        if (isWeeklyPlaceholderWorkItem(normalized)) {
+            return "";
+        }
+        return normalized;
+    }
+
+    private boolean isWeeklyPlaceholderWorkItem(String item) {
+        String normalized = StrUtil.trimToEmpty(item)
+                .replace("。", "")
+                .replace("！", "")
+                .replace("？", "")
+                .replace("；", "")
+                .replace(";", "");
+        return "暂无工作项".equals(normalized)
+                || "暂无内容".equals(normalized)
+                || "无工作项".equals(normalized)
+                || "暂无提交记录".equals(normalized)
+                || "无".equals(normalized);
     }
 
     private String buildRequirementGroupedSummary(List<GitCommit> commits, TemplateRule rule) {
