@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/nicegui/static/capabilities.schema.json",
+  "identifier": "default",
+  "description": "DevSync Hub default capabilities",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}

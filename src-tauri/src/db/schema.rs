@@ -1,0 +1,203 @@
+use rusqlite::Connection;
+use crate::error::AppResult;
+
+pub fn run_migrations(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS project (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            gitlab_url TEXT NOT NULL DEFAULT '',
+            gitlab_token TEXT NOT NULL DEFAULT '',
+            gitlab_project_id INTEGER NOT NULL DEFAULT 0,
+            gitlab_branch TEXT NOT NULL DEFAULT '',
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS iteration (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            project_id INTEGER NOT NULL DEFAULT 0,
+            name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'planning',
+            start_date TEXT NOT NULL DEFAULT '',
+            end_date TEXT NOT NULL DEFAULT '',
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS iteration_project (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            iteration_id INTEGER NOT NULL DEFAULT 0,
+            project_id INTEGER NOT NULL DEFAULT 0,
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS pending_sql (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            project_id INTEGER NOT NULL DEFAULT 0,
+            iteration_id INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            execution_order INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending',
+            executed_at TEXT,
+            executed_env TEXT NOT NULL DEFAULT '',
+            remark TEXT NOT NULL DEFAULT '',
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS sql_env_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            project_id INTEGER NOT NULL DEFAULT 0,
+            env_code TEXT NOT NULL DEFAULT '',
+            env_name TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS sql_execution_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            sql_id INTEGER NOT NULL DEFAULT 0,
+            env TEXT NOT NULL DEFAULT '',
+            executed_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            executor TEXT NOT NULL DEFAULT '',
+            remark TEXT NOT NULL DEFAULT '',
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS report (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            type TEXT NOT NULL DEFAULT 'daily',
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            start_date TEXT NOT NULL DEFAULT '',
+            end_date TEXT NOT NULL DEFAULT '',
+            commit_summary TEXT NOT NULL DEFAULT '',
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS report_template (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            type TEXT NOT NULL DEFAULT 'daily',
+            name TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            is_default INTEGER NOT NULL DEFAULT 0,
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS api_key (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            name TEXT NOT NULL DEFAULT '',
+            key_hash TEXT NOT NULL DEFAULT '',
+            key_prefix TEXT NOT NULL DEFAULT '',
+            last_used_at TEXT,
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS system_setting (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            setting_key TEXT NOT NULL DEFAULT '',
+            setting_value TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS git_commit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            project_id INTEGER NOT NULL DEFAULT 0,
+            commit_id TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL DEFAULT '',
+            author_name TEXT NOT NULL DEFAULT '',
+            author_email TEXT NOT NULL DEFAULT '',
+            committed_at TEXT NOT NULL DEFAULT '',
+            additions INTEGER NOT NULL DEFAULT 0,
+            deletions INTEGER NOT NULL DEFAULT 0,
+            branch TEXT NOT NULL DEFAULT '',
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS requirement (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            iteration_id INTEGER NOT NULL DEFAULT 0,
+            name TEXT NOT NULL DEFAULT '',
+            requirement_code TEXT NOT NULL DEFAULT '',
+            environment TEXT NOT NULL DEFAULT '',
+            link TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending_dev',
+            branch TEXT NOT NULL DEFAULT '',
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS requirement_project (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            requirement_id INTEGER NOT NULL DEFAULT 0,
+            project_id INTEGER NOT NULL DEFAULT 0,
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS work_item_link (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 0,
+            work_item_id INTEGER NOT NULL DEFAULT 0,
+            link_type TEXT NOT NULL DEFAULT '',
+            link_id INTEGER NOT NULL DEFAULT 0,
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
+    ")?;
+    Ok(())
+}
