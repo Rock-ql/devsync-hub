@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { settingApi, type ApiKeyItem, type ApiKeyCreateResult, type SystemSetting } from '@/api/setting'
-import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check } from 'lucide-react'
+import { settingApi, type ApiKeyItem, type ApiKeyCreateResult, type SystemSetting, type ImportResult } from '@/api/setting'
+import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,6 +28,8 @@ export default function Settings() {
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyValue, setNewKeyValue] = useState('')
   const [copied, setCopied] = useState(false)
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
     queryKey: ['settings'],
@@ -92,6 +94,39 @@ export default function Settings() {
     }
   }
 
+  const importMutation = useMutation({
+    mutationFn: (content: string) => settingApi.importData(content),
+    onSuccess: (data) => {
+      setImportResult(data)
+      queryClient.invalidateQueries()
+    },
+  })
+
+  const exportMutation = useMutation({
+    mutationFn: () => settingApi.exportData(),
+    onSuccess: (json) => {
+      const blob = new Blob([json], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `devsync-export-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    },
+  })
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const content = ev.target?.result as string
+      if (content) importMutation.mutate(content)
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
   return (
     <div className="space-y-10">
       <div className="space-y-4">
@@ -107,6 +142,7 @@ export default function Settings() {
           <TabsTrigger value="general">基础设置</TabsTrigger>
           <TabsTrigger value="apikey">API Key 管理</TabsTrigger>
           <TabsTrigger value="template">模板设置</TabsTrigger>
+          <TabsTrigger value="data">数据管理</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general">
@@ -366,6 +402,80 @@ export default function Settings() {
                   <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
                     {updateSettingMutation.isPending ? '保存中...' : '保存模板'}
                   </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="data" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>导入数据</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                从 Web 版导出的 JSON 文件导入数据。使用 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">scripts/export-pg-data.js</code> 从 PostgreSQL 导出。
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImportFile}
+                className="hidden"
+              />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importMutation.isPending}
+              >
+                <Upload className="h-4 w-4" />
+                {importMutation.isPending ? '导入中...' : '选择 JSON 文件导入'}
+              </Button>
+
+              {importMutation.isError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                  导入失败: {String(importMutation.error)}
+                </div>
+              )}
+
+              {importResult && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                  <p className="text-sm font-medium text-emerald-800 mb-3">
+                    导入成功，共 {importResult.total} 条记录
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                    {importResult.tables.filter(t => t.count > 0).map((t) => (
+                      <div key={t.table} className="flex items-center justify-between rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs">
+                        <span className="text-muted-foreground">{t.table}</span>
+                        <Badge variant="soft" tone="success">{t.count}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>导出数据</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                将当前客户端所有数据导出为 JSON 文件，可用于备份或迁移到其他设备。
+              </p>
+              <Button
+                variant="secondary"
+                onClick={() => exportMutation.mutate()}
+                disabled={exportMutation.isPending}
+              >
+                <Download className="h-4 w-4" />
+                {exportMutation.isPending ? '导出中...' : '导出数据'}
+              </Button>
+
+              {exportMutation.isError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                  导出失败: {String(exportMutation.error)}
                 </div>
               )}
             </CardContent>

@@ -1,282 +1,205 @@
 # DevSync Hub
 
-项目进度管理系统，面向开发者的迭代管理工具。
-
-## 功能特性
-
-- **项目管理** - 管理多个项目，支持 GitLab 仓库集成
-- **迭代管理** - 跟踪迭代进度，状态流转（规划中→开发中→测试中→已上线）
-- **SQL 管理** - 记录待执行 SQL，防止生产环境遗漏
-- **日报周报** - 基于 GitLab 提交记录，AI 自动生成工作报告
-- **API 接口** - 支持 AI 编程助手调用
+跨平台项目进度管理桌面客户端，基于 Tauri 2 构建。集成 GitLab 提交同步、SQL 变更追踪、迭代管理、需求关联和 AI 日报/周报生成。
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 后端 | Spring Boot 3.2 + JDK 17 + MyBatis Plus |
-| 数据库 | PostgreSQL 15 |
-| 缓存 | Redis 7 |
-| 前端 | React 18 + Vite + TailwindCSS |
-| AI | DeepSeek API |
-| 部署 | Docker Compose |
+| 桌面框架 | Tauri 2 |
+| 后端 | Rust (rusqlite + reqwest + axum) |
+| 前端 | React 19 + TypeScript + TailwindCSS |
+| 状态管理 | TanStack Query v5 |
+| 数据库 | SQLite (本地存储) |
+| AI 集成 | DeepSeek API |
 
-## 快速启动
+## 功能模块
 
-### 前置条件
+- **项目管理** — 关联 GitLab 仓库，同步提交记录，多分支支持
+- **迭代管理** — 创建迭代周期，关联项目，状态流转
+- **需求管理** — 需求录入与状态跟踪，关联 SQL 和提交
+- **SQL 管理** — 待执行 SQL 登记，多环境执行状态追踪
+- **日报/周报** — 基于 Git 提交自动生成，支持 DeepSeek AI 润色
+- **仪表盘** — 项目概览、提交统计、待办汇总
+- **数据迁移** — 支持从 Web 版 (PostgreSQL) 导入数据，支持导出备份
 
-- Docker 20.10+
-- Docker Compose 2.0+
+## 快速开始
 
-### 1. 克隆项目
+### 环境要求
 
-```bash
-git clone <repository-url>
-cd devSync_hub
-```
+- [Node.js](https://nodejs.org/) >= 18
+- [Rust](https://www.rust-lang.org/tools/install) >= 1.75
+- [Tauri CLI](https://v2.tauri.app/start/prerequisites/)
 
-### 2. 配置环境变量
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件，修改以下配置：
-
-```env
-# 数据库密码（必须修改）
-POSTGRES_PASSWORD=your_secure_password
-
-# Redis 密码（必须修改）
-REDIS_PASSWORD=your_redis_password
-
-# DeepSeek API Key（可选，用于生成日报周报）
-DEEPSEEK_API_KEY=sk-your-deepseek-key
-
-# 加密密钥（必须修改，用于加密 GitLab Token）
-ENCRYPT_KEY=your-32-char-encrypt-key-here!!
-```
-
-### 3. 启动服务
+### 安装依赖
 
 ```bash
-docker-compose up -d
-```
-
-首次启动会自动：
-- 创建数据库表结构
-- 初始化默认配置
-- 构建前后端镜像
-
-### 4. 访问系统
-
-- **Web 界面**: http://localhost
-- **API 文档**: http://localhost/api/doc.html
-
-## Docker 常用命令
-
-### 重新构建镜像并启动
-
-```bash
-# 重新构建前端
-docker-compose up -d --build frontend
-
-# 重新构建后端
-docker-compose up -d --build backend
-
-# 重新构建整个项目
-docker-compose up -d --build
-```
-
-如需强制全量重建（忽略缓存）：
-
-```bash
-docker-compose build --no-cache frontend
-docker-compose build --no-cache backend
-docker-compose build --no-cache
-```
-
-### 查看日志
-
-```bash
-# 查看全部服务日志
-docker-compose logs -f --tail=200
-
-# 查看单个服务日志
-docker-compose logs -f backend
-docker-compose logs -f frontend
-docker-compose logs -f nginx
-docker-compose logs -f postgres
-docker-compose logs -f redis
-```
-
-### 重启服务
-
-```bash
-docker-compose restart backend
-docker-compose restart frontend
-docker-compose restart nginx
-```
-
-## 配置说明
-
-### 环境变量
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `POSTGRES_PASSWORD` | PostgreSQL 密码 | - |
-| `REDIS_PASSWORD` | Redis 密码 | - |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key | - |
-| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | https://api.deepseek.com |
-| `ENCRYPT_KEY` | 加密密钥（32字符） | - |
-
-### 端口映射
-
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| Nginx | 80 | Web 入口 |
-| Backend | 8080 | 后端 API（内部） |
-| PostgreSQL | 5432 | 数据库（内部） |
-| Redis | 6379 | 缓存（内部） |
-
-## 使用指南
-
-### 1. 创建项目
-
-1. 进入「项目管理」页面
-2. 点击「新增项目」
-3. 填写项目名称和描述
-4. （可选）配置 GitLab 信息：
-   - GitLab 仓库地址
-   - Access Token（需要 `read_api` 权限）
-   - 项目 ID
-   - 默认分支
-
-### 2. 创建迭代
-
-1. 进入「迭代管理」页面
-2. 点击「新增迭代」
-3. 选择所属项目，填写迭代名称
-4. 设置计划时间范围
-5. 通过下拉框切换迭代状态
-
-### 3. 记录 SQL
-
-1. 进入「SQL 管理」页面
-2. 点击「新增 SQL」
-3. 选择项目和迭代
-4. 填写 SQL 标题和内容
-5. 执行后点击「标记已执行」
-
-### 4. 生成日报周报
-
-1. 进入「日报周报」页面
-2. 点击「生成报告」
-3. 选择报告类型（日报/周报）
-4. 选择日期范围
-5. 系统自动汇总 GitLab 提交，AI 生成报告
-
-### 5. API 调用
-
-1. 进入「系统设置」->「API Key 管理」
-2. 创建 API Key
-3. 在请求头中携带 `X-API-Key`
-
-```bash
-curl -X POST http://localhost/api/sql/add \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: dsk_your_api_key" \
-  -d '{
-    "projectId": 1,
-    "iterationId": 1,
-    "title": "添加索引",
-    "content": "CREATE INDEX idx_user_phone ON user(phone);"
-  }'
-```
-
-详细接口文档见 [docs/api.md](docs/api.md)
-
-## 开发模式
-
-### 后端开发
-
-```bash
-cd backend
-
-# 本地运行（需要先启动 PostgreSQL 和 Redis）
-./mvnw spring-boot:run -Dspring-boot.run.profiles=local
-```
-
-### 前端开发
-
-```bash
-cd frontend
-
-# 安装依赖
 npm install
-
-# 启动开发服务器
-npm run dev
 ```
 
-前端开发服务器会自动代理 `/api` 请求到后端。
-
-## 常见问题
-
-### Q: 启动失败，提示端口被占用
-
-检查 80、5432、6379 端口是否被占用：
+### 开发模式
 
 ```bash
-lsof -i :80
-lsof -i :5432
-lsof -i :6379
+cargo tauri dev
 ```
 
-### Q: 数据库连接失败
+前端热更新在 `http://localhost:1420`，Rust 后端自动编译。
 
-1. 检查 `.env` 中的密码配置
-2. 确认 PostgreSQL 容器正常运行：`docker-compose ps`
-3. 查看日志：`docker-compose logs postgres`
-
-### Q: 日报生成失败
-
-1. 确认已配置 DeepSeek API Key
-2. 检查 GitLab 配置是否正确
-3. 确认选择的日期范围内有提交记录
-
-### Q: 如何重置数据库
+### 生产构建
 
 ```bash
-# 停止服务
-docker-compose down
-
-# 删除数据卷
-docker volume rm devsync_hub_postgres_data
-
-# 重新启动
-docker-compose up -d
+cargo tauri build
 ```
+
+产物位于 `src-tauri/target/release/bundle/`。
 
 ## 项目结构
 
 ```
 devSync_hub/
-├── docker-compose.yml      # Docker 编排
-├── .env.example            # 环境变量模板i
-├── README.md               # 项目说明
-├── docs/
-│   └── api.md              # API 文档
-├── nginx/
-│   └── nginx.conf          # Nginx 配置
-├── backend/                # 后端项目
-│   ├── Dockerfile
-│   ├── pom.xml
-│   └── src/
-└── frontend/               # 前端项目
-    ├── Dockerfile
-    ├── package.json
-    └── src/
+├── src/                        # 前端源码
+│   ├── api/                    # Tauri IPC API 层
+│   │   ├── index.ts            # invoke 封装 + PageResult 类型
+│   │   ├── project.ts          # 项目 API
+│   │   ├── iteration.ts        # 迭代 API
+│   │   ├── requirement.ts      # 需求 API
+│   │   ├── sql.ts              # SQL API
+│   │   ├── report.ts           # 报告 API
+│   │   ├── dashboard.ts        # 仪表盘 API
+│   │   └── setting.ts          # 设置 + 数据导入导出 API
+│   ├── components/             # UI 组件
+│   │   ├── ui/                 # 基础 UI 组件 (Radix UI)
+│   │   ├── requirement/        # 需求相关组件
+│   │   └── sql/                # SQL 相关组件
+│   ├── pages/                  # 页面组件
+│   │   ├── Dashboard.tsx       # 仪表盘
+│   │   ├── Projects.tsx        # 项目管理
+│   │   ├── Iterations.tsx      # 迭代管理
+│   │   ├── SqlManagement.tsx   # SQL 管理
+│   │   ├── Reports.tsx         # 日报周报
+│   │   └── Settings.tsx        # 系统设置
+│   ├── hooks/                  # 自定义 Hooks
+│   ├── App.tsx                 # 路由配置
+│   └── main.tsx                # 入口
+├── src-tauri/                  # Rust 后端
+│   ├── src/
+│   │   ├── commands/           # Tauri IPC 命令层
+│   │   ├── services/           # 业务逻辑层
+│   │   ├── models/             # 数据模型
+│   │   ├── db/                 # SQLite 数据库
+│   │   │   ├── schema.rs       # 表结构定义 (14 张表)
+│   │   │   └── migration.rs    # 数据导入导出
+│   │   ├── clients/            # 外部 API 客户端
+│   │   │   ├── gitlab_client.rs
+│   │   │   └── deepseek_client.rs
+│   │   ├── axum_gateway/       # HTTP 网关 (SSE, port 3721)
+│   │   ├── error.rs            # 统一错误类型
+│   │   └── lib.rs              # 应用入口
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+├── scripts/
+│   └── export-pg-data.js       # PG → JSON 数据导出脚本
+├── package.json
+└── vite.config.ts
+```
+
+## 数据迁移 (Web 版 → 桌面版)
+
+如果你之前使用的是 Web 版 (Spring Boot + PostgreSQL)，可以按以下步骤迁移数据。
+
+### 1. 从 PostgreSQL 导出
+
+```bash
+# 安装 pg 驱动
+npm install pg
+
+# 执行导出（替换为你的数据库连接信息）
+node scripts/export-pg-data.js \
+  --host=localhost \
+  --port=5432 \
+  --db=devsync \
+  --user=postgres \
+  --password=your_password
+```
+
+也可以使用环境变量：
+
+```bash
+PG_HOST=localhost PG_PORT=5432 PG_DB=devsync PG_USER=postgres PG_PASSWORD=xxx \
+  node scripts/export-pg-data.js
+```
+
+导出文件默认为 `devsync-export-YYYY-MM-DD.json`。
+
+### 2. 在桌面客户端导入
+
+1. 打开 DevSync Hub 桌面客户端
+2. 进入 **设置 → 数据管理**
+3. 点击 **选择 JSON 文件导入**
+4. 选择导出的 JSON 文件
+5. 导入完成后会显示各表的导入记录数
+
+### 3. 数据备份
+
+在 **设置 → 数据管理 → 导出数据** 可以将当前客户端数据导出为 JSON 文件，用于备份或迁移到其他设备。
+
+## 配置说明
+
+首次启动后，在 **设置** 页面配置：
+
+| 配置项 | 说明 |
+|--------|------|
+| DeepSeek API URL | AI 服务地址，默认 `https://api.deepseek.com` |
+| DeepSeek API Key | 用于 AI 日报/周报生成 |
+| Git 作者邮箱 | 过滤提交记录，留空则获取所有人的提交 |
+| 全局 GitLab Token | 所有项目共用，项目级 Token 可覆盖 |
+
+## 数据存储
+
+SQLite 数据库存储位置：
+
+| 平台 | 路径 |
+|------|------|
+| macOS | `~/Library/Application Support/devsync-hub/devsync.db` |
+| Windows | `%APPDATA%/devsync-hub/devsync.db` |
+| Linux | `~/.local/share/devsync-hub/devsync.db` |
+
+## 使用指南
+
+### 创建项目
+
+1. 进入「项目管理」页面，点击「新增项目」
+2. 填写项目名称和描述
+3. 配置 GitLab 信息：仓库地址、Access Token（需 `read_api` 权限）、项目 ID、默认分支
+4. 点击「同步提交」拉取 GitLab 提交记录
+
+### 创建迭代
+
+1. 进入「迭代管理」页面，点击「新增迭代」
+2. 选择关联项目，填写迭代名称和时间范围
+3. 通过状态按钮切换：规划中 → 开发中 → 测试中 → 已上线
+
+### 记录 SQL
+
+1. 进入「SQL 管理」页面，点击「新增 SQL」
+2. 选择项目和迭代，填写 SQL 标题和内容
+3. 执行后标记对应环境的执行状态
+
+### 生成日报/周报
+
+1. 进入「日报周报」页面，点击「生成报告」
+2. 选择报告类型和日期范围
+3. 系统自动汇总 GitLab 提交，通过 DeepSeek AI 生成报告
+4. 支持编辑和自定义模板
+
+## 开发命令
+
+```bash
+npm run dev          # 启动前端开发服务器
+npm run build        # 构建前端 (tsc + vite build)
+npm run test         # 运行测试 (vitest)
+cargo tauri dev      # 启动桌面应用 (开发模式)
+cargo tauri build    # 构建桌面安装包
 ```
 
 ## License

@@ -78,6 +78,9 @@ pub fn run() {
             commands::setting_cmd::create_api_key,
             commands::setting_cmd::list_api_keys,
             commands::setting_cmd::delete_api_key,
+            // Migration
+            commands::migration_cmd::import_data,
+            commands::migration_cmd::export_data,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

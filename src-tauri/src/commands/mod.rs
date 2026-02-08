@@ -5,3 +5,4 @@ pub mod report_cmd;
 pub mod requirement_cmd;
 pub mod dashboard_cmd;
 pub mod setting_cmd;
+pub mod migration_cmd;

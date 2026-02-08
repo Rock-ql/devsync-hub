@@ -22,6 +22,11 @@ export interface ApiKeyCreateResult {
   key_prefix: string;
 }
 
+export interface ImportResult {
+  total: number;
+  tables: { table: string; count: number }[];
+}
+
 export const settingApi = {
   getAll: () =>
     invoke<SystemSetting[]>("get_all_settings"),
@@ -35,4 +40,8 @@ export const settingApi = {
     invoke<ApiKeyItem[]>("list_api_keys"),
   deleteApiKey: (id: number) =>
     invoke<void>("delete_api_key", { id }),
+  importData: (jsonContent: string) =>
+    invoke<ImportResult>("import_data", { jsonContent }),
+  exportData: () =>
+    invoke<string>("export_data"),
 };
