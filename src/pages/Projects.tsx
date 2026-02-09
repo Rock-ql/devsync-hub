@@ -570,7 +570,7 @@ export default function Projects() {
           <Tabs
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as DetailTab)}
-            className="mt-6 flex flex-1 flex-col"
+            className="mt-6 flex min-h-0 flex-1 flex-col"
           >
             <TabsList className="self-start">
               <TabsTrigger value="overview">概览</TabsTrigger>
@@ -578,7 +578,7 @@ export default function Projects() {
               <TabsTrigger value="iterations">迭代</TabsTrigger>
               <TabsTrigger value="sql">SQL</TabsTrigger>
             </TabsList>
-            <div className="mt-4 flex-1 overflow-y-auto pr-2">
+            <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-2">
               <TabsContent value="overview" className="mt-0 space-y-4">
                 {selectedProject ? (
                   <>
@@ -661,7 +661,10 @@ export default function Projects() {
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-foreground truncate">
+                          <p
+                            className="text-sm font-medium text-foreground whitespace-pre-wrap break-words"
+                            title={commit.message}
+                          >
                             {commit.message}
                           </p>
                           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -686,8 +689,11 @@ export default function Projects() {
                             )}
                           </div>
                         </div>
-                        <code className="text-xs text-muted-foreground font-mono">
-                          {commit.commit_id.substring(0, 8)}
+                        <code
+                          className="text-xs text-muted-foreground font-mono break-all text-right"
+                          title={commit.commit_id}
+                        >
+                          {commit.commit_id}
                         </code>
                       </div>
                     </div>
