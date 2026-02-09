@@ -27,17 +27,35 @@ pub async fn generate_report(state: State<'_, AppState>, req: ReportGenerateReq)
     }; // DB lock dropped here
 
     // Phase 2: Call AI (async, no DB lock held)
-    let content = if !ctx.api_key.is_empty() {
+    let content = if !ctx.api_key.is_empty() && !ctx.structured_input.is_empty() {
         let client = DeepSeekClient::new(&ctx.base_url, &ctx.api_key);
-        match client.chat(&ctx.prompt).await {
+        let result = if ctx.report_type == "weekly" {
+            client.generate_weekly_report(&ctx.structured_input, &ctx.template).await
+        } else {
+            client.generate_daily_report(&ctx.structured_input, &ctx.template).await
+        };
+        match result {
             Ok(c) => c,
             Err(e) => {
-                log::warn!("AI generation failed, using fallback: {}", e);
-                report_service::generate_fallback(&ctx.project_commits, &ctx.type_label)
+                log::warn!("[报告生成] AI生成{}失败，使用fallback: {}", ctx.type_label, e);
+                report_service::generate_fallback(
+                    &ctx.report_type,
+                    &ctx.structured_input,
+                    &ctx.project_commits,
+                    &ctx.type_label,
+                )
             }
         }
     } else {
-        report_service::generate_fallback(&ctx.project_commits, &ctx.type_label)
+        if ctx.api_key.is_empty() {
+            log::warn!("[报告生成] 未配置DeepSeek API Key，使用fallback");
+        }
+        report_service::generate_fallback(
+            &ctx.report_type,
+            &ctx.structured_input,
+            &ctx.project_commits,
+            &ctx.type_label,
+        )
     };
 
     // Phase 3: Insert report into DB (sync)

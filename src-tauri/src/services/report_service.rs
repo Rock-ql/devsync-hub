@@ -2,6 +2,26 @@ use rusqlite::{params, Connection};
 use crate::error::{AppError, AppResult};
 use crate::models::report::*;
 use crate::models::common::PageResult;
+use crate::models::requirement::Requirement;
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
+use std::collections::{HashMap, HashSet};
+
+const NEAREST_ANCHOR_MAX_MINUTES: i64 = 30;
+
+#[derive(Debug, Clone)]
+struct CommitInfo {
+    project_id: i32,
+    project_name: String,
+    message: String,
+    branch: String,
+    committed_at: String,
+}
+
+#[derive(Debug, Clone)]
+struct CodedRequirement {
+    requirement: Requirement,
+    code: String,
+}
 
 pub fn list_reports(conn: &Connection, req: &ReportListReq) -> AppResult<PageResult<Report>> {
     let page = req.page.unwrap_or(1);
@@ -64,99 +84,932 @@ pub fn get_report_detail(conn: &Connection, id: i32) -> AppResult<Report> {
     ).map_err(|_| AppError::NotFound("Report not found".into()))
 }
 
-/// Prepare data for report generation (sync DB reads only)
+pub struct GenerateReportContext {
+    pub report_type: String,
+    pub commit_summary: String,
+    pub structured_input: String,
+    pub template: String,
+    pub type_label: String,
+    pub project_commits: HashMap<String, Vec<String>>,
+    pub base_url: String,
+    pub api_key: String,
+}
+
 pub fn generate_report_prepare(conn: &Connection, req: &ReportGenerateReq) -> AppResult<GenerateReportContext> {
-    let mut commit_sql = "SELECT gc.project_id, p.name, gc.message, gc.author_name, gc.author_email, gc.committed_at, gc.branch FROM git_commit gc INNER JOIN project p ON gc.project_id = p.id WHERE gc.state = 1 AND gc.committed_at >= ? AND gc.committed_at <= ?".to_string();
+    let type_label = if req.r#type == "daily" { "日报" } else { "周报" };
+
+    let (structured_input, project_commits) = if req.r#type == "weekly" {
+        // 周报：优先从当周日报聚合（即使没有 Git 提交也能生成）
+        let (weekly_summary, daily_project_work) =
+            build_weekly_summary_from_daily_reports_with_projects(conn, &req.start_date, &req.end_date);
+        if !weekly_summary.trim().is_empty() {
+            log::info!("[报告生成] 周报使用当周日报聚合，日期: {} ~ {}", req.start_date, req.end_date);
+            (weekly_summary, daily_project_work)
+        } else {
+            log::info!("[报告生成] 周报无可用日报，回退到Git提交记录");
+            let commits = query_commits(conn, req)?;
+            let project_commits = build_project_commits(&commits);
+            (format_commits_text(&project_commits), project_commits)
+        }
+    } else {
+        // 日报：必须基于 Git 提交记录生成
+        let commits = query_commits(conn, req)?;
+        let project_commits = build_project_commits(&commits);
+        let structured_input = match build_daily_summary_by_requirement(conn, &commits) {
+            Ok(text) => text,
+            Err(err) => {
+                log::warn!("[报告生成] 构建日报结构化输入失败，回退到Git提交: {}", err);
+                format_commits_text(&project_commits)
+            }
+        };
+
+        (structured_input, project_commits)
+    };
+
+    let commit_summary = serde_json::to_string(&project_commits).unwrap_or_default();
+
+    // 获取模板
+    let template: String = conn.query_row(
+        "SELECT content FROM report_template WHERE type = ? AND is_default = 1 AND state = 1",
+        params![req.r#type], |row| row.get(0),
+    ).unwrap_or_else(|_| String::new());
+
+    let template = if req.r#type == "daily" {
+        build_daily_template_reference(&template)
+    } else {
+        template
+    };
+
+    // 获取 API 配置
+    let base_url: String = conn.query_row(
+        "SELECT setting_value FROM system_setting WHERE setting_key = 'deepseek.base.url' AND state = 1",
+        [], |r| r.get(0),
+    ).unwrap_or_else(|_| "https://api.deepseek.com".to_string());
+
+    let api_key: String = conn.query_row(
+        "SELECT setting_value FROM system_setting WHERE setting_key = 'deepseek.api.key' AND state = 1",
+        [], |r| r.get(0),
+    ).unwrap_or_default();
+
+    Ok(GenerateReportContext {
+        report_type: req.r#type.clone(),
+        commit_summary,
+        structured_input,
+        template,
+        type_label: type_label.to_string(),
+        project_commits,
+        base_url,
+        api_key,
+    })
+}
+
+fn query_commits(conn: &Connection, req: &ReportGenerateReq) -> AppResult<Vec<CommitInfo>> {
+    let mut sql = "SELECT gc.commit_id, gc.project_id, p.name, gc.message, gc.branch, gc.committed_at FROM git_commit gc \
+        INNER JOIN project p ON gc.project_id = p.id \
+        WHERE gc.state = 1 AND gc.deleted_at IS NULL \
+          AND p.state = 1 AND p.deleted_at IS NULL \
+          AND gc.committed_at >= ? AND gc.committed_at <= ?"
+        .to_string();
+
     let mut pv: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
         Box::new(format!("{} 00:00:00", req.start_date)),
         Box::new(format!("{} 23:59:59", req.end_date)),
     ];
 
     if let Some(email) = &req.author_email {
-        if !email.is_empty() {
-            commit_sql.push_str(" AND gc.author_email = ?");
-            pv.push(Box::new(email.clone()));
+        let normalized = email.trim();
+        if !normalized.is_empty() {
+            sql.push_str(" AND gc.author_email = ?");
+            pv.push(Box::new(normalized.to_string()));
         }
     }
+
     if let Some(pids) = &req.project_ids {
         if !pids.is_empty() {
             let placeholders: Vec<String> = pids.iter().map(|_| "?".to_string()).collect();
-            commit_sql.push_str(&format!(" AND gc.project_id IN ({})", placeholders.join(",")));
+            sql.push_str(&format!(" AND gc.project_id IN ({})", placeholders.join(",")));
             for pid in pids {
                 pv.push(Box::new(*pid));
             }
         }
     }
-    commit_sql.push_str(" ORDER BY gc.committed_at ASC");
 
-    let refs: Vec<&dyn rusqlite::types::ToSql> = pv.iter().map(|p| p.as_ref() as &dyn rusqlite::types::ToSql).collect();
-    let mut stmt = conn.prepare(&commit_sql)?;
+    sql.push_str(" ORDER BY gc.committed_at ASC, gc.id ASC");
 
-    struct CommitRow { project_name: String, message: String }
+    let refs: Vec<&dyn rusqlite::types::ToSql> = pv
+        .iter()
+        .map(|p| p.as_ref() as &dyn rusqlite::types::ToSql)
+        .collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), |row| {
+        Ok(CommitInfo {
+            project_id: row.get(1)?,
+            project_name: row.get(2)?,
+            message: row.get(3)?,
+            branch: row.get(4)?,
+            committed_at: row.get(5)?,
+        })
+    })?;
 
-    let commits: Vec<CommitRow> = stmt.query_map(refs.as_slice(), |row| {
-        Ok(CommitRow { project_name: row.get(1)?, message: row.get(2)? })
-    })?.filter_map(|r| r.ok())
-    .filter(|c| !c.message.starts_with("Merge"))
-    .collect();
-
+    let commits: Vec<CommitInfo> = rows.filter_map(|r| r.ok()).collect();
     if commits.is_empty() {
-        return Err(AppError::BadRequest("No commits found in the specified date range".into()));
+        return Err(AppError::BadRequest("指定日期范围内没有找到提交记录".into()));
+    }
+    Ok(commits)
+}
+
+fn build_project_commits(commits: &[CommitInfo]) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for commit in commits {
+        if is_merge_commit(&commit.message) {
+            continue;
+        }
+        let message = normalize_commit_message(&commit.message);
+        if message.is_empty() {
+            continue;
+        }
+        result
+            .entry(commit.project_name.clone())
+            .or_default()
+            .push(message);
+    }
+    result
+}
+
+fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo]) -> AppResult<String> {
+    let display_commits: Vec<CommitInfo> = commits
+        .iter()
+        .filter(|commit| !is_merge_commit(&commit.message))
+        .cloned()
+        .collect();
+
+    if display_commits.is_empty() {
+        return Ok("暂无提交记录".to_string());
     }
 
-    let mut project_commits: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    for c in &commits {
-        project_commits.entry(c.project_name.clone()).or_default().push(c.message.clone());
+    let requirements = load_active_requirements(conn)?;
+    if requirements.is_empty() {
+        return Ok(render_daily_other_work_only(&display_commits));
     }
 
-    let commit_summary = serde_json::to_string(&project_commits).unwrap_or_default();
+    let coded_requirements: Vec<CodedRequirement> = requirements
+        .into_iter()
+        .filter_map(|requirement| {
+            let code = get_requirement_code(&requirement);
+            if code.is_empty() {
+                None
+            } else {
+                Some(CodedRequirement { requirement, code })
+            }
+        })
+        .collect();
 
-    let type_label = if req.r#type == "daily" { "日报".to_string() } else { "周报".to_string() };
-    let mut prompt = format!(
-        "请根据以下 Git 提交记录生成一份{}（{}至{}）。\n\n按项目分组，每个项目列出主要工作内容，使用 Markdown 格式。\n\n提交记录：\n",
-        type_label, req.start_date, req.end_date
-    );
-    for (project, msgs) in &project_commits {
-        prompt.push_str(&format!("\n## {}\n", project));
-        for msg in msgs {
-            prompt.push_str(&format!("- {}\n", msg));
+    if coded_requirements.is_empty() {
+        return Ok(render_daily_other_work_only(&display_commits));
+    }
+
+    let requirement_ids: Vec<i32> = coded_requirements.iter().map(|item| item.requirement.id).collect();
+    let requirement_project_ids = load_requirement_project_ids(conn, &requirement_ids)?;
+
+    let mut requirement_commits: HashMap<i32, Vec<CommitInfo>> = HashMap::new();
+    let mut other_commits: Vec<CommitInfo> = Vec::new();
+
+    for commit in &display_commits {
+        if let Some(requirement_id) = match_requirement(commit, &coded_requirements, &requirement_project_ids) {
+            requirement_commits
+                .entry(requirement_id)
+                .or_default()
+                .push(commit.clone());
+        } else {
+            other_commits.push(commit.clone());
         }
     }
 
-    let template: Option<String> = conn.query_row(
-        "SELECT content FROM report_template WHERE type = ? AND is_default = 1 AND state = 1",
-        params![req.r#type], |row| row.get(0),
-    ).ok();
-    if let Some(tpl) = &template {
-        prompt.push_str(&format!("\n\n请参考以下模板格式：\n{}", tpl));
+    other_commits = assign_unmatched_commits_by_nearest_anchor(other_commits, &mut requirement_commits);
+
+    if requirement_commits.is_empty() {
+        return Ok(render_daily_other_work_only(&display_commits));
     }
 
-    let base_url: String = conn.query_row(
-        "SELECT setting_value FROM system_setting WHERE setting_key = 'deepseek_base_url' AND state = 1",
-        [], |r| r.get(0),
-    ).unwrap_or_else(|_| "https://api.deepseek.com".to_string());
+    let mut output = String::from("## 需求工作:\n");
+    let mut has_requirement_content = false;
 
-    let api_key: String = conn.query_row(
-        "SELECT setting_value FROM system_setting WHERE setting_key = 'deepseek_api_key' AND state = 1",
-        [], |r| r.get(0),
-    ).unwrap_or_default();
+    for coded in &coded_requirements {
+        let grouped_commits = requirement_commits.get(&coded.requirement.id);
+        if grouped_commits.is_none() || grouped_commits.is_some_and(|items| items.is_empty()) {
+            continue;
+        }
 
-    Ok(GenerateReportContext {
-        commit_summary, project_commits, type_label, prompt, base_url, api_key,
-    })
+        let grouped_commits = grouped_commits.unwrap_or(&Vec::new()).clone();
+        if grouped_commits.is_empty() {
+            continue;
+        }
+
+        has_requirement_content = true;
+        let project_display = format_requirement_projects(&grouped_commits);
+        let status_text = format_requirement_status(&coded.requirement.status);
+        let environment = coded.requirement.environment.trim();
+        let bracket_text = if environment.is_empty() {
+            format!("状态: {}", status_text)
+        } else {
+            format!("状态: {}, 环境: {}", status_text, environment)
+        };
+
+        output.push_str(&format!(
+            "### {}【{}】{} ({})\n",
+            coded.code, project_display, coded.requirement.name, bracket_text
+        ));
+        append_commit_lines(&mut output, &grouped_commits);
+        output.push('\n');
+    }
+
+    if !has_requirement_content {
+        return Ok(render_daily_other_work_only(&display_commits));
+    }
+
+    output.push_str("## 其他工作:\n");
+    append_other_work_by_project(&mut output, &other_commits);
+    Ok(output.trim().to_string())
 }
 
-/// Context data collected from DB for report generation
-pub struct GenerateReportContext {
-    pub commit_summary: String,
-    pub project_commits: std::collections::HashMap<String, Vec<String>>,
-    pub type_label: String,
-    pub prompt: String,
-    pub base_url: String,
-    pub api_key: String,
+fn load_active_requirements(conn: &Connection) -> AppResult<Vec<Requirement>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, iteration_id, name, requirement_code, environment, link, status, branch, state, created_at, updated_at \
+         FROM requirement \
+         WHERE state = 1 AND deleted_at IS NULL \
+         ORDER BY updated_at DESC, id DESC",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(Requirement {
+            id: row.get(0)?,
+            iteration_id: row.get(1)?,
+            name: row.get(2)?,
+            requirement_code: row.get(3)?,
+            environment: row.get(4)?,
+            link: row.get(5)?,
+            status: row.get(6)?,
+            branch: row.get(7)?,
+            state: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?;
+
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Insert generated report into DB (after async AI call)
+fn load_requirement_project_ids(
+    conn: &Connection,
+    requirement_ids: &[i32],
+) -> AppResult<HashMap<i32, HashSet<i32>>> {
+    if requirement_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let placeholders: Vec<String> = requirement_ids.iter().map(|_| "?".to_string()).collect();
+    let sql = format!(
+        "SELECT requirement_id, project_id FROM requirement_project WHERE state = 1 AND deleted_at IS NULL AND requirement_id IN ({})",
+        placeholders.join(",")
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    for requirement_id in requirement_ids {
+        params_vec.push(Box::new(*requirement_id));
+    }
+    let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec
+        .iter()
+        .map(|value| value.as_ref() as &dyn rusqlite::types::ToSql)
+        .collect();
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), |row| {
+        Ok((row.get::<_, i32>(0)?, row.get::<_, i32>(1)?))
+    })?;
+
+    let mut result: HashMap<i32, HashSet<i32>> = HashMap::new();
+    for item in rows.filter_map(|r| r.ok()) {
+        result.entry(item.0).or_default().insert(item.1);
+    }
+    Ok(result)
+}
+
+fn match_requirement(
+    commit: &CommitInfo,
+    requirements: &[CodedRequirement],
+    requirement_project_ids: &HashMap<i32, HashSet<i32>>,
+) -> Option<i32> {
+    let branch_candidates = parse_branch_candidates(&commit.branch);
+
+    for requirement in requirements {
+        let requirement_code = requirement.code.to_lowercase();
+        if !requirement_code.is_empty()
+            && branch_candidates
+                .iter()
+                .any(|candidate| candidate.contains(&requirement_code))
+        {
+            return Some(requirement.requirement.id);
+        }
+    }
+
+    let message_code = extract_requirement_code_from_text(&commit.message);
+    if !message_code.is_empty() {
+        for requirement in requirements {
+            if message_code == requirement.code {
+                return Some(requirement.requirement.id);
+            }
+        }
+    }
+
+    let mut project_matched_ids: Vec<i32> = Vec::new();
+    for requirement in requirements {
+        if let Some(project_ids) = requirement_project_ids.get(&requirement.requirement.id) {
+            if project_ids.contains(&commit.project_id) {
+                project_matched_ids.push(requirement.requirement.id);
+            }
+        }
+    }
+
+    if project_matched_ids.len() == 1 {
+        project_matched_ids.first().copied()
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RequirementAnchor {
+    requirement_id: i32,
+    committed_at: DateTime<FixedOffset>,
+}
+
+fn assign_unmatched_commits_by_nearest_anchor(
+    unmatched_commits: Vec<CommitInfo>,
+    requirement_commits: &mut HashMap<i32, Vec<CommitInfo>>,
+) -> Vec<CommitInfo> {
+    if unmatched_commits.is_empty() || requirement_commits.is_empty() {
+        return unmatched_commits;
+    }
+
+    let mut anchors_by_project: HashMap<i32, Vec<RequirementAnchor>> = HashMap::new();
+    for (requirement_id, commits) in requirement_commits.iter() {
+        for commit in commits {
+            if let Some(committed_at) = parse_commit_time(&commit.committed_at) {
+                anchors_by_project
+                    .entry(commit.project_id)
+                    .or_default()
+                    .push(RequirementAnchor {
+                        requirement_id: *requirement_id,
+                        committed_at,
+                    });
+            }
+        }
+    }
+
+    if anchors_by_project.is_empty() {
+        return unmatched_commits;
+    }
+
+    let mut still_unmatched: Vec<CommitInfo> = Vec::new();
+
+    for commit in unmatched_commits {
+        let Some(commit_time) = parse_commit_time(&commit.committed_at) else {
+            still_unmatched.push(commit);
+            continue;
+        };
+
+        let Some(anchors) = anchors_by_project.get(&commit.project_id) else {
+            still_unmatched.push(commit);
+            continue;
+        };
+
+        let mut nearest_requirement_id: Option<i32> = None;
+        let mut nearest_minutes = i64::MAX;
+
+        for anchor in anchors {
+            let minutes = (commit_time - anchor.committed_at).num_minutes().abs();
+            if minutes <= NEAREST_ANCHOR_MAX_MINUTES && minutes < nearest_minutes {
+                nearest_minutes = minutes;
+                nearest_requirement_id = Some(anchor.requirement_id);
+            }
+        }
+
+        if let Some(requirement_id) = nearest_requirement_id {
+            requirement_commits
+                .entry(requirement_id)
+                .or_default()
+                .push(commit.clone());
+        } else {
+            still_unmatched.push(commit);
+        }
+    }
+
+    still_unmatched
+}
+
+fn get_requirement_code(requirement: &Requirement) -> String {
+    let configured = requirement.requirement_code.trim().to_uppercase();
+    if !configured.is_empty() {
+        return configured;
+    }
+    extract_requirement_code_from_text(&requirement.name)
+}
+
+fn extract_requirement_code_from_text(text: &str) -> String {
+    let chars: Vec<char> = text.trim().to_uppercase().chars().collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+
+    let mut index = 0;
+    while index < chars.len() {
+        if !chars[index].is_ascii_alphabetic() {
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        while index < chars.len() && chars[index].is_ascii_alphabetic() {
+            index += 1;
+        }
+
+        if index >= chars.len() || chars[index] != '-' {
+            continue;
+        }
+
+        let hyphen_idx = index;
+        index += 1;
+        let digits_start = index;
+        while index < chars.len() && chars[index].is_ascii_digit() {
+            index += 1;
+        }
+
+        if index > digits_start {
+            return chars[start..index].iter().collect();
+        }
+
+        index = hyphen_idx + 1;
+    }
+
+    String::new()
+}
+
+fn parse_branch_candidates(branch_text: &str) -> HashSet<String> {
+    let mut result = HashSet::new();
+    let trimmed = branch_text.trim();
+    if trimmed.is_empty() {
+        return result;
+    }
+
+    for item in trimmed.split(',') {
+        let normalized = item.trim().to_lowercase();
+        if !normalized.is_empty() {
+            result.insert(normalized);
+        }
+    }
+
+    if result.is_empty() {
+        result.insert(trimmed.to_lowercase());
+    }
+
+    result
+}
+
+fn parse_commit_time(time_text: &str) -> Option<DateTime<FixedOffset>> {
+    let value = time_text.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(value) {
+        return Some(parsed);
+    }
+
+    let offset = FixedOffset::east_opt(8 * 3600)?;
+
+    for format in [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+    ] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(value, format) {
+            if let Some(parsed) = offset.from_local_datetime(&naive).single() {
+                return Some(parsed);
+            }
+        }
+    }
+
+    None
+}
+
+fn render_daily_other_work_only(commits: &[CommitInfo]) -> String {
+    let mut output = String::from("## 其他工作:\n");
+    append_other_work_by_project(&mut output, commits);
+    output.trim().to_string()
+}
+
+fn append_other_work_by_project(buffer: &mut String, commits: &[CommitInfo]) {
+    let grouped = group_commits_by_project(commits);
+    if grouped.is_empty() {
+        buffer.push_str("### 未关联项目\n1. 暂无工作项\n");
+        return;
+    }
+
+    for (project_name, messages) in grouped {
+        buffer.push_str(&format!("### {}\n", project_name));
+        for (index, message) in messages.iter().enumerate() {
+            buffer.push_str(&format!("{}. {}\n", index + 1, message));
+        }
+        buffer.push('\n');
+    }
+}
+
+fn append_commit_lines(buffer: &mut String, commits: &[CommitInfo]) {
+    let mut seen = HashSet::new();
+    let mut ordered_messages: Vec<String> = Vec::new();
+
+    for commit in commits {
+        let message = normalize_commit_message(&commit.message);
+        if message.is_empty() {
+            continue;
+        }
+        if seen.insert(message.clone()) {
+            ordered_messages.push(message);
+        }
+    }
+
+    for (index, message) in ordered_messages.iter().enumerate() {
+        buffer.push_str(&format!("{}. {}\n", index + 1, message));
+    }
+}
+
+fn group_commits_by_project(commits: &[CommitInfo]) -> Vec<(String, Vec<String>)> {
+    let mut project_order: Vec<String> = Vec::new();
+    let mut grouped: HashMap<String, Vec<String>> = HashMap::new();
+
+    for commit in commits {
+        let project_name = if commit.project_name.trim().is_empty() {
+            "未关联项目".to_string()
+        } else {
+            commit.project_name.clone()
+        };
+
+        if !grouped.contains_key(&project_name) {
+            project_order.push(project_name.clone());
+        }
+
+        let message = normalize_commit_message(&commit.message);
+        if !message.is_empty() {
+            grouped.entry(project_name).or_default().push(message);
+        }
+    }
+
+    let mut result: Vec<(String, Vec<String>)> = Vec::new();
+    for project_name in project_order {
+        let Some(messages) = grouped.remove(&project_name) else {
+            continue;
+        };
+
+        let mut seen = HashSet::new();
+        let deduped: Vec<String> = messages
+            .into_iter()
+            .filter(|message| seen.insert(message.clone()))
+            .collect();
+
+        if !deduped.is_empty() {
+            result.push((project_name, deduped));
+        }
+    }
+
+    result
+}
+
+fn format_requirement_projects(commits: &[CommitInfo]) -> String {
+    let mut seen = HashSet::new();
+    let mut ordered_projects: Vec<String> = Vec::new();
+
+    for commit in commits {
+        let project_name = if commit.project_name.trim().is_empty() {
+            format!("项目{}", commit.project_id)
+        } else {
+            commit.project_name.clone()
+        };
+
+        if seen.insert(project_name.clone()) {
+            ordered_projects.push(project_name);
+        }
+    }
+
+    if ordered_projects.is_empty() {
+        "未关联项目".to_string()
+    } else {
+        ordered_projects.join("/")
+    }
+}
+
+fn normalize_commit_message(message: &str) -> String {
+    message.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn format_requirement_status(status: &str) -> &'static str {
+    match status {
+        "presented" => "已宣讲",
+        "pending_dev" => "待研发",
+        "developing" => "开发中",
+        "integrating" => "联调中",
+        "pending_test" => "待测试",
+        "testing" => "测试中",
+        "pending_acceptance" => "待验收",
+        "pending_release" => "待上线",
+        "released" => "已上线",
+        _ => "未知状态",
+    }
+}
+
+fn is_merge_commit(message: &str) -> bool {
+    let normalized = message.trim().to_lowercase();
+    normalized.starts_with("merge branch")
+        || normalized.starts_with("merge remote-tracking branch")
+        || normalized.starts_with("merge pull request")
+        || normalized.starts_with("merge !")
+        || normalized.starts_with("merge ")
+}
+
+fn build_daily_template_reference(template: &str) -> String {
+    let default_reference = "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作\n2. 其他工作\n   1. 按项目分组列出";
+    if template.trim().is_empty() {
+        return default_reference.to_string();
+    }
+
+    let mut selected_lines: Vec<String> = Vec::new();
+    for line in template.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.contains("{{commits}}") || trimmed.contains("{commits}") {
+            continue;
+        }
+        if trimmed.starts_with('#') || contains_any(trimmed, &["今日工作", "明日计划", "问题与风险"]) {
+            selected_lines.push(trimmed.to_string());
+        }
+    }
+
+    let mut normalized = selected_lines.join("\n");
+    if normalized.trim().is_empty() {
+        normalized = default_reference.to_string();
+    }
+
+    if !normalized.contains("今日工作内容") {
+        normalized = format!("今日工作内容：\n{}", normalized);
+    }
+
+    if !normalized.contains("需求编号") {
+        normalized.push_str("\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作");
+    }
+
+    if !normalized.contains("其他工作") {
+        normalized.push_str("\n2. 其他工作\n   1. 按项目分组列出");
+    }
+
+    normalized
+}
+
+fn contains_any(content: &str, keywords: &[&str]) -> bool {
+    keywords.iter().any(|keyword| content.contains(keyword))
+}
+
+fn format_commits_text(project_commits: &HashMap<String, Vec<String>>) -> String {
+    let mut text = String::new();
+    for (project, msgs) in project_commits {
+        text.push_str(&format!("## {}\n", project));
+        for msg in msgs {
+            text.push_str(&format!("- {}\n", msg));
+        }
+        text.push('\n');
+    }
+    text
+}
+
+/// 从当周已有日报聚合生成周报输入，同时返回项目-工作映射
+fn build_weekly_summary_from_daily_reports_with_projects(
+    conn: &Connection,
+    start_date: &str,
+    end_date: &str,
+) -> (String, HashMap<String, Vec<String>>) {
+    let mut stmt = match conn.prepare(
+        "SELECT id, content, start_date FROM report \
+         WHERE type = 'daily' AND state = 1 AND deleted_at IS NULL \
+         AND start_date >= ? AND start_date <= ? \
+         ORDER BY start_date ASC, id DESC",
+    ) {
+        Ok(stmt) => stmt,
+        Err(_) => return (String::new(), HashMap::new()),
+    };
+
+    let reports: Vec<(String, String)> = stmt
+        .query_map(params![start_date, end_date], |row| {
+            Ok((row.get::<_, String>(2)?, row.get::<_, String>(1)?))
+        })
+        .ok()
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default();
+
+    if reports.is_empty() {
+        return (String::new(), HashMap::new());
+    }
+
+    // 每天只取最新一份日报（按 start_date 去重）
+    let mut seen_dates = HashSet::new();
+    let mut unique_contents: Vec<String> = Vec::new();
+    for (date, content) in reports {
+        if seen_dates.insert(date) {
+            unique_contents.push(content);
+        }
+    }
+
+    // 从日报内容提取项目-工作映射（保持项目出现顺序）
+    let mut project_order: Vec<String> = Vec::new();
+    let mut project_work: HashMap<String, Vec<String>> = HashMap::new();
+    for content in unique_contents {
+        extract_project_work_from_daily(&content, &mut project_work, &mut project_order);
+    }
+
+    if project_work.is_empty() {
+        return (String::new(), HashMap::new());
+    }
+
+    // 格式化为周报输入（稳定输出顺序）
+    let mut summary = String::new();
+    for project in &project_order {
+        let Some(items) = project_work.get(project) else {
+            continue;
+        };
+
+        if items.is_empty() {
+            continue;
+        }
+
+        summary.push_str(&format!("## {}\n", project));
+        for item in items {
+            summary.push_str(&format!("- {}\n", item));
+        }
+        summary.push('\n');
+    }
+
+    (summary, project_work)
+}
+
+/// 从日报 Markdown 内容中提取项目和工作项
+fn extract_project_work_from_daily(
+    content: &str,
+    project_work: &mut HashMap<String, Vec<String>>,
+    project_order: &mut Vec<String>,
+) {
+    let mut current_project = String::new();
+
+    for line in content.lines() {
+        let line = line.trim_end();
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // 匹配项目标题：## 项目名 / ### 项目名 / 数字. 项目名 / xxx【项目名】yyy
+        if let Some(project) = extract_project_name(trimmed) {
+            if !project_work.contains_key(&project) {
+                project_order.push(project.clone());
+                project_work.insert(project.clone(), Vec::new());
+            }
+            current_project = project;
+            continue;
+        }
+
+        // 匹配工作项：- xxx / 数字. xxx
+        if current_project.is_empty() {
+            continue;
+        }
+
+        if let Some(item) = extract_work_item(line) {
+            let item = item.trim();
+            if item.is_empty() {
+                continue;
+            }
+
+            let items = project_work.entry(current_project.clone()).or_default();
+            if !items.contains(&item.to_string()) {
+                items.push(item.to_string());
+            }
+        }
+    }
+}
+
+fn extract_project_name(line: &str) -> Option<String> {
+    // ## 项目名 / ### 项目名
+    if line.starts_with("## ") || line.starts_with("### ") {
+        let name = line.trim_start_matches('#').trim();
+        if is_valid_project_name(name) {
+            return Some(name.to_string());
+        }
+    }
+
+    // 需求编号【项目名】xxx / ### ABC-123【项目名】xxx
+    if let Some(project) = extract_bracket_project(line) {
+        if is_valid_project_name(&project) {
+            return Some(project);
+        }
+    }
+
+    // 数字. 项目名（一级条目，非工作项）
+    if let Some(candidate) = strip_numbered_list_prefix(line) {
+        let candidate = candidate.trim();
+        if looks_like_project_title(candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+
+    None
+}
+
+fn extract_work_item(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // - xxx
+    if let Some(item) = trimmed.strip_prefix("- ") {
+        return Some(item.trim().to_string());
+    }
+
+    // 数字. xxx
+    if let Some(item) = strip_numbered_list_prefix(trimmed) {
+        let item = item.trim();
+        if item.is_empty() {
+            return None;
+        }
+        if contains_any(item, &["需求工作", "其他工作", "今日工作内容", "明日计划", "问题与风险"]) {
+            return None;
+        }
+        return Some(item.to_string());
+    }
+
+    None
+}
+
+fn strip_numbered_list_prefix(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let without_digits = trimmed.trim_start_matches(|c: char| c.is_ascii_digit());
+    if without_digits.len() == trimmed.len() {
+        return None;
+    }
+    without_digits.strip_prefix(". ")
+}
+
+fn extract_bracket_project(line: &str) -> Option<String> {
+    let start = line.find('【')?;
+    let end = line[start..].find('】')? + start;
+    let name = &line[start + '【'.len_utf8()..end];
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+
+    if contains_any(name, &["结构化", "模板", "示例", "输入", "输出"]) {
+        return None;
+    }
+
+    Some(name.to_string())
+}
+
+fn is_valid_project_name(name: &str) -> bool {
+    let name = name.trim();
+    if name.is_empty() {
+        return false;
+    }
+    if contains_any(name, &["工作内容", "今日", "本周", "需求工作", "其他工作", "明日计划", "问题与风险"]) {
+        return false;
+    }
+    true
+}
+
+fn looks_like_project_title(candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return false;
+    }
+    if candidate.starts_with('-') {
+        return false;
+    }
+    if candidate.len() > 30 {
+        return false;
+    }
+    if contains_any(candidate, &["需求编号", "状态", "环境", "完成", "修复", "优化", "添加", "更新", "调整", "今日工作", "其他工作"]) {
+        return false;
+    }
+    true
+}
+
 pub fn generate_report_insert(conn: &Connection, req: &ReportGenerateReq, ctx: &GenerateReportContext, content: &str) -> AppResult<Report> {
     let title = format!("{} ({} ~ {})", ctx.type_label, req.start_date, req.end_date);
     conn.execute(
@@ -167,9 +1020,28 @@ pub fn generate_report_insert(conn: &Connection, req: &ReportGenerateReq, ctx: &
     get_report_detail(conn, id)
 }
 
-/// Generate fallback content when AI is unavailable
-pub fn generate_fallback(project_commits: &std::collections::HashMap<String, Vec<String>>, type_label: &str) -> String {
-    generate_fallback_content(project_commits, type_label)
+pub fn generate_fallback(
+    report_type: &str,
+    structured_input: &str,
+    project_commits: &HashMap<String, Vec<String>>,
+    type_label: &str,
+) -> String {
+    if report_type == "daily" {
+        let normalized = structured_input.trim();
+        if !normalized.is_empty() {
+            return format!("今日工作内容：\n{}\n", normalized);
+        }
+    }
+
+    let mut content = format!("# {}\n\n", type_label);
+    for (project, msgs) in project_commits {
+        content.push_str(&format!("## {}\n\n", project));
+        for msg in msgs {
+            content.push_str(&format!("- {}\n", msg));
+        }
+        content.push('\n');
+    }
+    content
 }
 
 pub fn update_report(conn: &Connection, req: &ReportUpdateReq) -> AppResult<()> {
@@ -225,17 +1097,81 @@ pub fn get_month_summary(conn: &Connection, req: &ReportMonthSummaryReq) -> AppR
     Ok(MonthSummaryRsp { daily_reports, weekly_reports })
 }
 
-fn generate_fallback_content(
-    project_commits: &std::collections::HashMap<String, Vec<String>>,
-    type_label: &str,
-) -> String {
-    let mut content = format!("# {}\n\n", type_label);
-    for (project, msgs) in project_commits {
-        content.push_str(&format!("## {}\n\n", project));
-        for msg in msgs {
-            content.push_str(&format!("- {}\n", msg));
-        }
-        content.push('\n');
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn strip_numbered_list_prefix_supports_multiple_digits() {
+        assert_eq!(strip_numbered_list_prefix("1. 项目A"), Some("项目A"));
+        assert_eq!(strip_numbered_list_prefix("10. 项目A"), Some("项目A"));
+        assert_eq!(strip_numbered_list_prefix("001. 项目A"), Some("项目A"));
+        assert_eq!(strip_numbered_list_prefix("- 项目A"), None);
+        assert_eq!(strip_numbered_list_prefix("项目A"), None);
     }
-    content
+
+    #[test]
+    fn extract_project_name_handles_bracket_and_markdown_titles() {
+        assert_eq!(extract_project_name("## DevSync"), Some("DevSync".to_string()));
+        assert_eq!(extract_project_name("### DevSync"), Some("DevSync".to_string()));
+        assert_eq!(
+            extract_project_name("ABC-123【DevSync】优化日报"),
+            Some("DevSync".to_string())
+        );
+        assert_eq!(extract_project_name("2. 其他工作"), None);
+        assert_eq!(extract_project_name("1. 修复登录问题"), None);
+    }
+
+    #[test]
+    fn extract_project_work_from_daily_keeps_indentation_items() {
+        let content = r#"今日工作内容：
+1. ABC-123【项目A】功能开发（状态: 开发中）
+   1. 完成模块X
+   2. 修复问题Y
+2. 其他工作
+   1. 项目B
+      1. 优化性能
+"#;
+
+        let mut project_work = HashMap::new();
+        let mut order = Vec::new();
+        extract_project_work_from_daily(content, &mut project_work, &mut order);
+        assert_eq!(order, vec!["项目A".to_string(), "项目B".to_string()]);
+        assert_eq!(
+            project_work.get("项目A").cloned().unwrap_or_default(),
+            vec!["完成模块X".to_string(), "修复问题Y".to_string()]
+        );
+        assert_eq!(
+            project_work.get("项目B").cloned().unwrap_or_default(),
+            vec!["优化性能".to_string()]
+        );
+    }
+
+    #[test]
+    fn weekly_prepare_works_without_git_commits_when_daily_exists() {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        crate::db::schema::run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO report (type, title, content, start_date, end_date, commit_summary) VALUES ('daily', 'd1', ?, '2026-02-01', '2026-02-01', '')",
+            params![
+                "今日工作内容：\n1. ABC-123【项目A】功能开发（状态: 开发中）\n   1. 完成模块X\n\n",
+            ],
+        )
+        .unwrap();
+
+        let req = ReportGenerateReq {
+            r#type: "weekly".to_string(),
+            start_date: "2026-02-01".to_string(),
+            end_date: "2026-02-07".to_string(),
+            author_email: None,
+            project_ids: None,
+        };
+
+        let ctx = generate_report_prepare(&conn, &req).expect("weekly prepare");
+        assert!(!ctx.structured_input.trim().is_empty());
+        assert!(ctx.structured_input.contains("项目A"));
+    }
 }
