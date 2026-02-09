@@ -10,6 +10,7 @@ import {
   endOfWeek,
   format,
   getDaysInMonth,
+  isValid,
   isSameDay,
   isSameMonth,
   isToday,
@@ -30,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
+import { toast } from '@/components/ui/toaster'
 
 interface WeekRow {
   weekNumber: number
@@ -143,16 +145,24 @@ function normalizeReportMarkdown(content: string): string {
   return normalizedLines.join('\n')
 }
 
+function toValidDate(value: Date, fallback: Date): Date {
+  return isValid(value) ? value : fallback
+}
+
+function formatSafeDate(value: Date, pattern: string, fallbackText: string): string {
+  return isValid(value) ? format(value, pattern) : fallbackText
+}
+
 export default function Reports() {
   const queryClient = useQueryClient()
-  const today = new Date()
-  const [selectedMonth, setSelectedMonth] = useState<Date>(() => startOfMonth(today))
-  const [panelState, setPanelState] = useState<PanelState>(() => ({ mode: 'daily', date: today }))
+  const [safeToday] = useState(() => new Date())
+  const [selectedMonth, setSelectedMonth] = useState<Date>(() => startOfMonth(safeToday))
+  const [panelState, setPanelState] = useState<PanelState>(() => ({ mode: 'daily', date: safeToday }))
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false)
   const [generateForm, setGenerateForm] = useState({
     type: 'daily',
-    startDate: format(today, 'yyyy-MM-dd'),
-    endDate: format(today, 'yyyy-MM-dd'),
+    startDate: formatSafeDate(safeToday, 'yyyy-MM-dd', ''),
+    endDate: formatSafeDate(safeToday, 'yyyy-MM-dd', ''),
     authorEmail: '',
   })
   const [isEditing, setIsEditing] = useState(false)
@@ -171,10 +181,12 @@ export default function Reports() {
     return map
   }, [settingsData])
 
-  const monthStart = startOfMonth(selectedMonth)
-  const monthEnd = endOfMonth(selectedMonth)
-  const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 })
-  const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
+  const safeSelectedMonth = useMemo(() => toValidDate(selectedMonth, startOfMonth(safeToday)), [selectedMonth, safeToday])
+
+  const monthStart = useMemo(() => startOfMonth(safeSelectedMonth), [safeSelectedMonth])
+  const monthEnd = useMemo(() => endOfMonth(safeSelectedMonth), [safeSelectedMonth])
+  const calendarStart = useMemo(() => startOfWeek(monthStart, { weekStartsOn: 1 }), [monthStart])
+  const calendarEnd = useMemo(() => endOfWeek(monthEnd, { weekStartsOn: 1 }), [monthEnd])
 
   const weekRows = useMemo<WeekRow[]>(() => {
     return Array.from({ length: 6 }, (_, index) => {
@@ -189,15 +201,15 @@ export default function Reports() {
       return {
         date,
         dateKey: format(date, 'yyyy-MM-dd'),
-        isCurrentMonth: isSameMonth(date, selectedMonth),
+        isCurrentMonth: isSameMonth(date, safeSelectedMonth),
       }
     })
-  }, [calendarStart, selectedMonth])
+  }, [calendarStart, safeSelectedMonth])
 
 
   const { data: monthSummary, isLoading: isMonthLoading } = useQuery({
-    queryKey: ['report-month-summary', format(selectedMonth, 'yyyy-MM')],
-    queryFn: () => reportApi.monthSummary(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1),
+    queryKey: ['report-month-summary', format(safeSelectedMonth, 'yyyy-MM')],
+    queryFn: () => reportApi.monthSummary(safeSelectedMonth.getFullYear(), safeSelectedMonth.getMonth() + 1),
   })
 
   const dailyMap = useMemo(() => {
@@ -208,7 +220,11 @@ export default function Reports() {
     if (!monthSummary) return new Map<number, ReportBrief>()
     const map = new Map<number, ReportBrief>()
     for (const item of monthSummary.weekly_reports) {
-      const wn = resolveWeekNumber(parseISO(item.start_date), monthStart)
+      const startDate = parseISO(item.start_date)
+      if (!isValid(startDate)) {
+        continue
+      }
+      const wn = resolveWeekNumber(startDate, monthStart)
       map.set(wn, item)
     }
     return map
@@ -217,11 +233,11 @@ export default function Reports() {
   const selectedReportId = useMemo(() => {
     if (!monthSummary) return null
     if (panelState.mode === 'daily') {
-      const key = format(panelState.date, 'yyyy-MM-dd')
+      const key = formatSafeDate(panelState.date, 'yyyy-MM-dd', formatSafeDate(safeToday, 'yyyy-MM-dd', ''))
       return dailyMap.get(key)?.id ?? null
     }
     return weeklyMap.get(panelState.week.weekNumber)?.id ?? null
-  }, [dailyMap, monthSummary, panelState, weeklyMap])
+  }, [dailyMap, monthSummary, panelState, safeToday, weeklyMap])
 
   const { data: selectedReport, isLoading: isReportLoading } = useQuery({
     queryKey: ['report-detail', selectedReportId],
@@ -243,7 +259,11 @@ export default function Reports() {
     }),
     onSuccess: async (report) => {
       setIsGenerateModalOpen(false)
-      const sd = parseISO(report.start_date)
+      const parsedStart = parseISO(report.start_date)
+      const sd = toValidDate(parsedStart, safeToday)
+      if (!isValid(parsedStart)) {
+        toast.error('报告日期格式异常，已按当前日期展示')
+      }
       const nextMonth = startOfMonth(sd)
       setSelectedMonth(nextMonth)
       if (report.type === 'weekly') {
@@ -254,29 +274,54 @@ export default function Reports() {
         setPanelState({ mode: 'daily', date: sd })
       }
       const monthKey = format(nextMonth, 'yyyy-MM')
-      await queryClient.invalidateQueries({ queryKey: ['report-month-summary', monthKey] })
-      await queryClient.invalidateQueries({ queryKey: ['report-detail', report.id] })
-      await queryClient.refetchQueries({ queryKey: ['report-month-summary', monthKey], type: 'active' })
-      await queryClient.refetchQueries({ queryKey: ['report-detail', report.id], type: 'active' })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['report-month-summary', monthKey] }),
+        queryClient.invalidateQueries({ queryKey: ['report-detail', report.id] }),
+      ])
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => reportApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['report-month-summary'] })
-      queryClient.invalidateQueries({ queryKey: ['report-detail'] })
+    onSuccess: async (_, id) => {
+      queryClient.removeQueries({ queryKey: ['report-detail', id], exact: true })
+      const monthKey = format(safeSelectedMonth, 'yyyy-MM')
+      await queryClient.invalidateQueries({ queryKey: ['report-month-summary', monthKey] })
+      toast.success('删除成功')
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`删除失败：${message}`)
     },
   })
+
+  const handleDeleteReport = () => {
+    if (!selectedReport || deleteMutation.isPending) return
+
+    const reportId = Number(selectedReport.id)
+    if (!Number.isFinite(reportId) || reportId <= 0) {
+      toast.error('报告ID无效，无法删除')
+      return
+    }
+
+    toast.success(`正在删除报告 #${reportId}`)
+    deleteMutation.mutate(reportId)
+  }
 
   const updateMutation = useMutation({
     mutationFn: (data: { id: number; title: string; content: string }) =>
       reportApi.update(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['report-month-summary'] })
+      const monthKey = format(safeSelectedMonth, 'yyyy-MM')
+      queryClient.invalidateQueries({ queryKey: ['report-month-summary', monthKey] })
       queryClient.invalidateQueries({ queryKey: ['report-detail', selectedReportId] })
       setIsEditing(false)
       setHasUnsavedChanges(false)
+      toast.success('保存成功')
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`保存失败：${message}`)
     },
   })
 
@@ -339,7 +384,7 @@ export default function Reports() {
 
   const handleMonthChange = (offset: number) => {
     if (isEditing && !confirmLeave()) return
-    const next = addMonths(selectedMonth, offset)
+    const next = addMonths(safeSelectedMonth, offset)
     setSelectedMonth(next)
     setIsEditing(false)
     setHasUnsavedChanges(false)
@@ -349,11 +394,11 @@ export default function Reports() {
   const openGenerateWithPanel = () => {
     const savedEmail = settings?.['git.author.email'] || ''
     if (panelState.mode === 'daily') {
-      const dateValue = format(panelState.date, 'yyyy-MM-dd')
+      const dateValue = formatSafeDate(panelState.date, 'yyyy-MM-dd', formatSafeDate(safeToday, 'yyyy-MM-dd', ''))
       setGenerateForm({ type: 'daily', startDate: dateValue, endDate: dateValue, authorEmail: savedEmail })
     } else {
-      const startValue = format(panelState.week.weekStart, 'yyyy-MM-dd')
-      const endValue = format(panelState.week.weekEnd, 'yyyy-MM-dd')
+      const startValue = formatSafeDate(panelState.week.weekStart, 'yyyy-MM-dd', formatSafeDate(safeToday, 'yyyy-MM-dd', ''))
+      const endValue = formatSafeDate(panelState.week.weekEnd, 'yyyy-MM-dd', formatSafeDate(safeToday, 'yyyy-MM-dd', ''))
       setGenerateForm({ type: 'weekly', startDate: startValue, endDate: endValue, authorEmail: savedEmail })
     }
     setIsGenerateModalOpen(true)
@@ -361,14 +406,14 @@ export default function Reports() {
 
   const dailyCompleted = monthSummary?.daily_reports.length ?? 0
   const weeklyCompleted = monthSummary?.weekly_reports.length ?? 0
-  const dailyTotal = getDaysInMonth(selectedMonth)
+  const dailyTotal = getDaysInMonth(safeSelectedMonth)
   const weeklyTotal =
     differenceInCalendarWeeks(calendarEnd, calendarStart, { weekStartsOn: 1 }) + 1
 
   const emptyStateTitle =
     panelState.mode === 'daily'
-      ? `${format(panelState.date, 'yyyy年M月d日')} 暂无日报`
-      : `第${panelState.week.weekNumber}周 周报 (${format(panelState.week.weekStart, 'yyyy-MM-dd')} ~ ${format(panelState.week.weekEnd, 'yyyy-MM-dd')})`
+      ? `${formatSafeDate(panelState.date, 'yyyy年M月d日', formatSafeDate(safeToday, 'yyyy年M月d日', ''))} 暂无日报`
+      : `第${panelState.week.weekNumber}周 周报 (${formatSafeDate(panelState.week.weekStart, 'yyyy-MM-dd', formatSafeDate(safeToday, 'yyyy-MM-dd', ''))} ~ ${formatSafeDate(panelState.week.weekEnd, 'yyyy-MM-dd', formatSafeDate(safeToday, 'yyyy-MM-dd', ''))})`
 
   const emptyStateButton = panelState.mode === 'daily' ? '生成日报' : '生成周报'
 
@@ -412,7 +457,7 @@ export default function Reports() {
               <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => handleMonthChange(-1)} aria-label="上个月">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <CardTitle>{format(selectedMonth, 'yyyy年M月')}</CardTitle>
+              <CardTitle>{format(safeSelectedMonth, 'yyyy年M月')}</CardTitle>
               <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => handleMonthChange(1)} aria-label="下个月">
                 <ChevronRight className="h-4 w-4" />
               </Button>
@@ -582,7 +627,8 @@ export default function Reports() {
                           variant="ghost"
                           size="sm"
                           className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
-                          onClick={() => { if (confirm('确定要删除此报告吗？')) deleteMutation.mutate(selectedReport.id) }}
+                          onClick={handleDeleteReport}
+                          disabled={deleteMutation.isPending}
                           aria-label="删除报告"
                         >
                           <Trash2 className="h-4 w-4" />
