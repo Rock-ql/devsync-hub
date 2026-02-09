@@ -46,19 +46,16 @@ pub async fn delete_project(state: State<'_, AppState>, id: i32) -> AppResult<()
 #[tauri::command]
 pub async fn sync_commits(state: State<'_, AppState>, id: i32) -> AppResult<i32> {
     // Phase 1: Read project info from DB (sync)
-    let (gitlab_url, token, gitlab_project_id) = {
+    let (gitlab_url, token, gitlab_project_id, gitlab_branch) = {
         let db = state.db.lock().await;
         project_service::sync_commits_prepare(&db.conn, id)?
     }; // DB lock dropped here
 
     // Phase 2: Fetch from GitLab (async, no DB lock held)
     let client = GitLabClient::new(&gitlab_url, &token);
-    let branches = client.list_branches(gitlab_project_id).await?;
-    let mut branch_commits = Vec::new();
-    for branch in &branches {
-        let commits = client.list_commits(gitlab_project_id, &branch.name, 100).await?;
-        branch_commits.push((branch.name.clone(), commits));
-    }
+    let branch = if gitlab_branch.trim().is_empty() { "main".to_string() } else { gitlab_branch };
+    let commits = client.list_commits(gitlab_project_id, &branch, 100).await?;
+    let branch_commits = vec![(branch, commits)];
 
     // Phase 3: Insert commits into DB (sync)
     let db = state.db.lock().await;

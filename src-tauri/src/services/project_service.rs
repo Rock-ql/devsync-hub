@@ -194,13 +194,13 @@ pub fn delete_project(conn: &Connection, id: i32) -> AppResult<()> {
 }
 
 /// Prepare sync data needed for sync_commits (before async calls)
-pub fn sync_commits_prepare(conn: &Connection, id: i32) -> AppResult<(String, String, i32)> {
+pub fn sync_commits_prepare(conn: &Connection, id: i32) -> AppResult<(String, String, i32, String)> {
     let project = get_project_detail(conn, id)?.project;
     if project.gitlab_url.trim().is_empty() {
         return Err(AppError::BadRequest("GitLab repository URL not configured".into()));
     }
     let token = resolve_token(conn, &project.gitlab_token)?;
-    Ok((project.gitlab_url, token, project.gitlab_project_id))
+    Ok((project.gitlab_url, token, project.gitlab_project_id, project.gitlab_branch))
 }
 
 /// Insert fetched commits into DB (after async calls)
