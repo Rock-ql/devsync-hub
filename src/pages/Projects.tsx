@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { toast } from '@/components/ui/toaster'
 
 type DetailTab = 'overview' | 'commits' | 'iterations' | 'sql'
 
@@ -208,8 +209,18 @@ export default function Projects() {
     onMutate: (id: number) => {
       setSyncingProjectId(id)
     },
-    onSuccess: () => {
+    onSuccess: (addedCount, id) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['project-commits', id] })
+      if (addedCount > 0) {
+        toast.success(`同步成功，新增 ${addedCount} 条提交`)
+      } else {
+        toast.success('同步完成，暂无新增提交')
+      }
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`同步失败：${message}`)
     },
     onSettled: () => {
       setSyncingProjectId(null)
@@ -366,25 +377,25 @@ export default function Projects() {
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap gap-2">
                   <Badge tone="info" variant="soft">
-                    {project.iteration_count} 个迭代
+                    {project.iteration_count ?? 0} 个迭代
                   </Badge>
-                  {project.pending_sql_count > 0 ? (
+                  {(project.pending_sql_count ?? 0) > 0 ? (
                     <Badge tone="warning" variant="soft">
-                      {project.pending_sql_count} 条 SQL 待执行
+                      {project.pending_sql_count ?? 0} 条 SQL 待执行
                     </Badge>
                   ) : (
                     <Badge tone="success" variant="soft">
                       SQL 清零
                     </Badge>
                   )}
-                  {project.has_gitlab_config && (
+                  {Boolean(project.gitlab_url?.trim()) && (
                     <Badge tone="accent" variant="outline">
                       GitLab 已连接
                     </Badge>
                   )}
                 </div>
 
-                {project.has_gitlab_config && (
+                {Boolean(project.gitlab_url?.trim()) && (
                   <div
                     className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/40 px-4 py-3"
                     onClick={(e) => e.stopPropagation()}
@@ -597,7 +608,7 @@ export default function Projects() {
                           variant="ghost"
                           size="sm"
                           onClick={() => selectedProject && syncMutation.mutate(selectedProject.id)}
-                          disabled={!selectedProject?.has_gitlab_config || syncingProjectId === selectedProject?.id}
+                          disabled={!selectedProject?.gitlab_url?.trim() || syncingProjectId === selectedProject?.id}
                         >
                           {syncingProjectId === selectedProject?.id ? '同步中...' : '同步提交'}
                         </Button>

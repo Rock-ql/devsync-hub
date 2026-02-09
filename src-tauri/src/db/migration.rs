@@ -36,6 +36,44 @@ fn json_value_to_sql(v: &serde_json::Value) -> Box<dyn rusqlite::types::ToSql> {
     }
 }
 
+/// 获取 SQLite 表的实际列名
+fn get_table_columns(conn: &Connection, table: &str) -> Vec<String> {
+    let mut cols = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info({})", table)) {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(1)) {
+            for name in rows.flatten() {
+                cols.push(name);
+            }
+        }
+    }
+    cols
+}
+
+/// 获取 NOT NULL 且有默认值的列（用于 NULL 值回退）
+fn get_notnull_defaults(conn: &Connection, table: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info({})", table)) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(1)?,  // name
+                row.get::<_, i32>(3)?,     // notnull
+                row.get::<_, Option<String>>(4)?, // dflt_value
+            ))
+        }) {
+            for r in rows.flatten() {
+                let (name, notnull, dflt) = r;
+                if notnull == 1 {
+                    if let Some(d) = dflt {
+                        let d = d.trim_matches('\'').to_string();
+                        map.insert(name, d);
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
 /// 从 JSON 字符串导入数据
 pub fn import_from_json_content(conn: &Connection, json_content: &str) -> AppResult<ImportResult> {
     let tables: serde_json::Value = serde_json::from_str(json_content)
@@ -46,10 +84,17 @@ pub fn import_from_json_content(conn: &Connection, json_content: &str) -> AppRes
 
     for table in &TABLE_NAMES {
         let mut count = 0usize;
+        let valid_cols = get_table_columns(conn, table);
+        let notnull_defaults = get_notnull_defaults(conn, table);
+
         if let Some(rows) = tables.get(table).and_then(|v| v.as_array()) {
             for row in rows {
                 if let Some(obj) = row.as_object() {
-                    let cols: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+                    // 只取 SQLite 表中实际存在的列
+                    let cols: Vec<&str> = obj.keys()
+                        .map(|k| k.as_str())
+                        .filter(|k| valid_cols.iter().any(|c| c == k))
+                        .collect();
                     if cols.is_empty() { continue; }
                     let placeholders: Vec<&str> = cols.iter().map(|_| "?").collect();
                     let sql = format!(
@@ -57,13 +102,23 @@ pub fn import_from_json_content(conn: &Connection, json_content: &str) -> AppRes
                         table, cols.join(", "), placeholders.join(", ")
                     );
                     let values: Vec<Box<dyn rusqlite::types::ToSql>> = cols.iter()
-                        .map(|c| json_value_to_sql(&obj[*c]))
+                        .map(|c| {
+                            let v = &obj[*c];
+                            // NULL 值回退到 NOT NULL 列的默认值
+                            if v.is_null() {
+                                if let Some(dflt) = notnull_defaults.get(*c) {
+                                    return Box::new(dflt.clone()) as Box<dyn rusqlite::types::ToSql>;
+                                }
+                            }
+                            json_value_to_sql(v)
+                        })
                         .collect();
                     let params: Vec<&dyn rusqlite::types::ToSql> = values.iter()
                         .map(|v| v.as_ref() as &dyn rusqlite::types::ToSql)
                         .collect();
-                    if conn.execute(&sql, params.as_slice()).is_ok() {
-                        count += 1;
+                    match conn.execute(&sql, params.as_slice()) {
+                        Ok(_) => count += 1,
+                        Err(e) => eprintln!("[migration] {} 插入失败: {}", table, e),
                     }
                 }
             }

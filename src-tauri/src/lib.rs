@@ -8,6 +8,7 @@ pub mod error;
 
 use db::Database;
 use std::sync::Arc;
+use tauri::Manager;
 use tokio::sync::Mutex;
 
 pub struct AppState {
@@ -15,6 +16,8 @@ pub struct AppState {
 }
 
 pub fn run() {
+    env_logger::init();
+
     let db = Database::new().expect("Failed to initialize database");
     db.migrate().expect("Failed to run database migrations");
 
@@ -83,6 +86,13 @@ pub fn run() {
             commands::migration_cmd::export_data,
         ])
         .setup(|app| {
+            // 设置窗口图标
+            if let Some(window) = app.get_webview_window("main") {
+                let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
+                    .expect("Failed to load window icon");
+                let _ = window.set_icon(icon);
+            }
+
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = axum_gateway::start_gateway(handle).await {

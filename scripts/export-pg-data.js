@@ -41,6 +41,8 @@ const FIELD_TRANSFORMS = {
   executed_at: (v) => v ? new Date(v).toISOString().replace('T', ' ').slice(0, 19) : null,
   committed_at: (v) => v ? new Date(v).toISOString().replace('T', ' ').slice(0, 19) : null,
   last_used_at: (v) => v ? new Date(v).toISOString().replace('T', ' ').slice(0, 19) : null,
+  start_date: (v) => v ? new Date(v).toISOString().replace('T', ' ').slice(0, 19) : null,
+  end_date: (v) => v ? new Date(v).toISOString().replace('T', ' ').slice(0, 19) : null,
 };
 
 // 需要排除的 PG 特有字段 (SQLite schema 中不存在的)
