@@ -199,5 +199,15 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             deleted_at TEXT
         );
     ")?;
+
+    // 清理 git_commit 重复数据并建立唯一索引
+    conn.execute_batch("
+        DELETE FROM git_commit WHERE id NOT IN (
+            SELECT MIN(id) FROM git_commit GROUP BY project_id, commit_id, branch
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS uk_git_commit_project_commit_branch
+            ON git_commit(project_id, commit_id, branch);
+    ")?;
+
     Ok(())
 }

@@ -208,22 +208,14 @@ pub fn sync_commits_insert(conn: &Connection, project_id: i32, branch_commits: &
     let mut total_new = 0;
     for (branch_name, commits) in branch_commits {
         for commit in commits {
-            let exists: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM git_commit WHERE project_id = ? AND commit_id = ? AND branch = ?",
-                params![project_id, commit.id, branch_name],
-                |row| row.get(0),
-            ).unwrap_or(0);
-
-            if exists == 0 {
-                conn.execute(
-                    "INSERT INTO git_commit (project_id, commit_id, message, author_name, author_email, committed_at, additions, deletions, branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    params![
-                        project_id, commit.id, commit.message, commit.author_name, commit.author_email,
-                        commit.committed_date, commit.stats.additions, commit.stats.deletions, branch_name
-                    ],
-                )?;
-                total_new += 1;
-            }
+            let changed = conn.execute(
+                "INSERT OR IGNORE INTO git_commit (project_id, commit_id, message, author_name, author_email, committed_at, additions, deletions, branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    project_id, commit.id, commit.message, commit.author_name, commit.author_email,
+                    commit.committed_date, commit.stats.additions, commit.stats.deletions, branch_name
+                ],
+            )?;
+            total_new += changed as i32;
         }
     }
     Ok(total_new)
