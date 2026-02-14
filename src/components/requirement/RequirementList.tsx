@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { PageResult } from '@/api'
 import { Link2, Pencil, Plus, Trash2, GitBranch } from 'lucide-react'
 import { requirementApi, RequirementItem } from '@/api/requirement'
 import RequirementDialog from '@/components/requirement/RequirementDialog'
+import RequirementCommitsDialog from '@/components/requirement/RequirementCommitsDialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 
@@ -19,10 +22,16 @@ interface RequirementListProps {
   projects: ProjectOption[]
 }
 
+const PAGE_SIZE = 10
+
 export default function RequirementList({ iterationId, iterationName, projects }: RequirementListProps) {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<RequirementItem | null>(null)
+  const [commitsDialogOpen, setCommitsDialogOpen] = useState(false)
+  const [commitsRequirement, setCommitsRequirement] = useState<RequirementItem | null>(null)
+  const [keyword, setKeyword] = useState('')
+  const [page, setPage] = useState(1)
 
   const statusOptions = [
     { code: 'presented', desc: '已宣讲' },
@@ -36,16 +45,27 @@ export default function RequirementList({ iterationId, iterationName, projects }
     { code: 'released', desc: '已上线' },
   ]
 
-  const { data: requirements, isLoading } = useQuery<RequirementItem[]>({
-    queryKey: ['requirements', iterationId],
-    queryFn: () => requirementApi.list(iterationId),
+  const normalizedKeyword = keyword.trim()
+
+  useEffect(() => {
+    setPage(1)
+  }, [iterationId, normalizedKeyword])
+
+  const { data: requirementPage, isLoading, isFetching } = useQuery<PageResult<RequirementItem>>({
+    queryKey: ['requirements-page', iterationId, page, normalizedKeyword],
+    queryFn: () => requirementApi.listPage({
+      iteration_id: iterationId,
+      page,
+      size: PAGE_SIZE,
+      keyword: normalizedKeyword || undefined,
+    }),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => requirementApi.remove(id),
     onSuccess: () => {
       toast.success('需求已删除')
-      queryClient.invalidateQueries({ queryKey: ['requirements', iterationId] })
+      queryClient.invalidateQueries({ queryKey: ['requirements-page', iterationId] })
     },
     onError: (error: Error) => toast.error(error.message),
   })
@@ -54,7 +74,7 @@ export default function RequirementList({ iterationId, iterationName, projects }
     mutationFn: ({ id, status }: { id: number; status: string }) => requirementApi.updateStatus({ id, status }),
     onSuccess: () => {
       toast.success('状态已更新')
-      queryClient.invalidateQueries({ queryKey: ['requirements', iterationId] })
+      queryClient.invalidateQueries({ queryKey: ['requirements-page', iterationId] })
     },
     onError: (error: Error) => toast.error(error.message),
   })
@@ -82,6 +102,11 @@ export default function RequirementList({ iterationId, iterationName, projects }
     setDialogOpen(true)
   }
 
+  const handleOpenCommits = (item: RequirementItem) => {
+    setCommitsRequirement(item)
+    setCommitsDialogOpen(true)
+  }
+
   const handleDelete = (item: RequirementItem) => {
     const linkedTotal = (item.sql_count || 0) + (item.commit_count || 0)
     const message = linkedTotal > 0
@@ -98,12 +123,26 @@ export default function RequirementList({ iterationId, iterationName, projects }
     return extra > 0 ? `${visible.join(', ')} +${extra}` : visible.join(', ')
   }
 
-  const listItems = useMemo(() => requirements || [], [requirements])
+  const listItems = useMemo(() => requirementPage?.records || [], [requirementPage?.records])
+  const total = requirementPage?.total || 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm font-medium text-foreground">需求列表</div>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <Input
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="搜索需求名称或编码"
+            className="w-full sm:w-64"
+          />
+          {keyword ? (
+            <Button variant="secondary" size="sm" onClick={() => setKeyword('')}>
+              清空
+            </Button>
+          ) : null}
+        </div>
         <Button variant="secondary" size="sm" onClick={handleOpenAdd}>
           <Plus className="h-4 w-4" />
           添加需求
@@ -166,7 +205,15 @@ export default function RequirementList({ iterationId, iterationName, projects }
                   </Badge>
                 )}
                 <Badge variant="soft" tone="info">SQL {item.sql_count || 0}</Badge>
-                <Badge variant="soft" tone="neutral">提交 {item.commit_count || 0}</Badge>
+                <button
+                  type="button"
+                  className="focus:outline-none"
+                  onClick={() => handleOpenCommits(item)}
+                >
+                  <Badge variant="soft" tone="neutral" className="cursor-pointer hover:bg-muted">
+                    提交 {item.commit_count || 0}
+                  </Badge>
+                </button>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -191,8 +238,37 @@ export default function RequirementList({ iterationId, iterationName, projects }
           ))}
         </div>
       ) : (
-        <div className="text-sm text-muted-foreground">暂无需求，点击右上角添加</div>
+        <div className="text-sm text-muted-foreground">
+          {normalizedKeyword ? '没有匹配的需求' : '暂无需求，点击右上角添加'}
+        </div>
       )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span>
+          共 {total} 条 · 第 {Math.min(page, totalPages)} / {totalPages} 页
+          {isFetching ? ' · 刷新中...' : ''}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            type="button"
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            disabled={page <= 1 || isFetching}
+          >
+            上一页
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            type="button"
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={page >= totalPages || isFetching}
+          >
+            下一页
+          </Button>
+        </div>
+      </div>
 
       <RequirementDialog
         open={dialogOpen}
@@ -201,7 +277,18 @@ export default function RequirementList({ iterationId, iterationName, projects }
         iterationName={iterationName}
         projects={projects}
         initialData={editingItem}
-        onSaved={() => queryClient.invalidateQueries({ queryKey: ['requirements', iterationId] })}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['requirements-page', iterationId] })}
+      />
+
+      <RequirementCommitsDialog
+        open={commitsDialogOpen}
+        onOpenChange={(open) => {
+          setCommitsDialogOpen(open)
+          if (!open) {
+            setCommitsRequirement(null)
+          }
+        }}
+        requirement={commitsRequirement}
       />
     </div>
   )

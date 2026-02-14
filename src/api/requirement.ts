@@ -1,4 +1,4 @@
-import { invoke } from "@/api";
+import { invoke, PageResult } from "@/api";
 
 export interface RequirementItem {
   id: number;
@@ -51,9 +51,35 @@ export interface RequirementLinkPayload {
   link_id: number;
 }
 
+export interface RequirementCommitItem {
+  id: number;
+  project_id: number;
+  project_name: string;
+  commit_id: string;
+  message: string;
+  author_name: string;
+  author_email: string;
+  committed_at: string;
+  additions: number;
+  deletions: number;
+  branch: string;
+}
+
+export interface RequirementCommitListReq {
+  requirement_id: number;
+  page?: number;
+  size?: number;
+  start_date?: string;
+  end_date?: string;
+}
+
 export const requirementApi = {
   list: (iterationId: number) =>
     invoke<RequirementItem[]>("list_requirements", { req: { iteration_id: iterationId } }),
+  listPage: (params: { iteration_id: number; page?: number; size?: number; status?: string; keyword?: string }) =>
+    invoke<PageResult<RequirementItem>>("list_requirements_page", { req: params }),
+  listCommits: (params: RequirementCommitListReq) =>
+    invoke<PageResult<RequirementCommitItem>>("list_requirement_commits", { req: params }),
   add: (payload: RequirementAddPayload) =>
     invoke<number>("add_requirement", { req: payload }),
   update: (payload: RequirementUpdatePayload) =>

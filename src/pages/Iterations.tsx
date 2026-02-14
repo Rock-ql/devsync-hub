@@ -14,6 +14,7 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import RequirementList from '@/components/requirement/RequirementList'
+import { toast } from '@/components/ui/toaster'
 
 const statusStyles: Record<string, string> = {
   planning: 'bg-slate-100 text-slate-700 border-slate-200',
@@ -66,6 +67,11 @@ export default function Iterations() {
       queryClient.invalidateQueries({ queryKey: ['iterations'] })
       setIsModalOpen(false)
       resetForm()
+      toast.success('迭代已创建')
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`创建失败：${message}`)
     },
   })
 
@@ -75,6 +81,11 @@ export default function Iterations() {
       queryClient.invalidateQueries({ queryKey: ['iterations'] })
       setIsModalOpen(false)
       resetForm()
+      toast.success('迭代已更新')
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`更新失败：${message}`)
     },
   })
 
@@ -82,6 +93,11 @@ export default function Iterations() {
     mutationFn: (id: number) => iterationApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['iterations'] })
+      toast.success('迭代已删除')
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`删除失败：${message}`)
     },
   })
 
@@ -90,6 +106,11 @@ export default function Iterations() {
       iterationApi.updateStatus(id, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['iterations'] })
+      toast.success('状态已更新')
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`状态更新失败：${message}`)
     },
   })
 
@@ -129,12 +150,37 @@ export default function Iterations() {
     return extra > 0 ? `${visible.join(', ')} +${extra}` : visible.join(', ')
   }
 
+  const confirmDeleteIteration = (iteration: IterationDetail) => {
+    const requirementCount = iteration.requirement_count ?? 0
+    const sqlCount = iteration.pending_sql_count ?? 0
+    return confirm(
+      `删除迭代「${iteration.name}」将级联删除 ${requirementCount} 条需求及 ${sqlCount} 条 SQL（含执行记录），是否继续？`
+    )
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (formData.start_date && formData.end_date && formData.end_date < formData.start_date) {
+      toast.error('结束日期不能早于开始日期')
+      return
+    }
+
+    const payload = {
+      ...formData,
+      name: formData.name.trim(),
+      description: formData.description.trim(),
+    }
+
+    if (!payload.name) {
+      toast.error('迭代名称不能为空')
+      return
+    }
+
     if (editingIteration) {
-      updateMutation.mutate({ id: editingIteration.id, ...formData })
+      updateMutation.mutate({ id: editingIteration.id, ...payload })
     } else {
-      addMutation.mutate(formData)
+      addMutation.mutate(payload)
     }
   }
 
@@ -258,7 +304,7 @@ export default function Iterations() {
                             size="sm"
                             className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
                             onClick={() => {
-                              if (confirm('确定要删除此迭代吗？')) {
+                              if (confirmDeleteIteration(iteration)) {
                                 deleteMutation.mutate(iteration.id)
                               }
                             }}
@@ -366,7 +412,7 @@ export default function Iterations() {
                       size="sm"
                       className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
                       onClick={() => {
-                        if (confirm('确定要删除此迭代吗？')) {
+                        if (confirmDeleteIteration(iteration)) {
                           deleteMutation.mutate(iteration.id)
                         }
                       }}

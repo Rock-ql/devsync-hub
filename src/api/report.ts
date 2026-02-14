@@ -89,7 +89,7 @@ export const reportApi = {
     invoke<unknown>("list_reports", { req: params || {} }).then(normalizeReportPage),
   detail: (id: number) =>
     invoke<unknown>("get_report_detail", { id }).then(normalizeReport),
-  generate: (data: { type: string; start_date: string; end_date: string; author_email?: string; project_ids?: number[] }) =>
+  generate: (data: { type: string; start_date: string; end_date: string; force?: boolean; author_email?: string; project_ids?: number[] }) =>
     invoke<unknown>("generate_report", { req: data }).then(normalizeReport),
   update: (data: { id: number; title?: string; content?: string }) =>
     invoke<void>("update_report", { req: data }),

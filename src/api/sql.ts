@@ -25,6 +25,14 @@ export interface EnvExecution {
   remark: string | null;
 }
 
+export interface SqlEnvConfig {
+  id: number;
+  project_id: number;
+  env_code: string;
+  env_name: string;
+  sort_order: number;
+}
+
 export interface PendingSqlDetail {
   id: number;
   project_id: number;
@@ -62,6 +70,17 @@ export const sqlApi = {
     invoke<void>("execute_sql", { req: data }),
   batchExecute: (data: { ids: number[]; env: string; executor?: string; remark?: string }) =>
     invoke<void>("batch_execute_sql", { req: data }),
+  batchDelete: (data: { ids: number[] }) =>
+    invoke<void>("batch_delete_sql", { req: data }),
   revokeExecution: (data: { sql_id: number; env: string }) =>
     invoke<void>("revoke_execution", { req: data }),
+
+  listEnvConfigs: (projectId: number) =>
+    invoke<SqlEnvConfig[]>("list_sql_env_configs", { req: { project_id: projectId } }),
+  addEnvConfig: (data: { project_id: number; env_code: string; env_name: string; sort_order?: number }) =>
+    invoke<number>("add_sql_env_config", { req: data }),
+  updateEnvConfig: (data: { id: number; env_code?: string; env_name?: string; sort_order?: number }) =>
+    invoke<void>("update_sql_env_config", { req: data }),
+  deleteEnvConfig: (id: number) =>
+    invoke<void>("delete_sql_env_config", { id }),
 };

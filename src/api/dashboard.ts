@@ -12,6 +12,9 @@ export interface DashboardOverview {
   recent_projects: RecentProject[];
   recent_iterations: RecentIteration[];
   pending_sql_by_project: ProjectPendingCount[];
+  requirement_status_dist: StatusCount[];
+  daily_commit_trend: DailyCommitCount[];
+  recent_reports: RecentReport[];
 }
 
 export interface RecentProject {
@@ -32,6 +35,23 @@ export interface ProjectPendingCount {
   project_id: number;
   project_name: string;
   count: number;
+}
+
+export interface StatusCount {
+  status: string;
+  count: number;
+}
+
+export interface DailyCommitCount {
+  date: string;
+  count: number;
+}
+
+export interface RecentReport {
+  id: number;
+  type: string;
+  title: string;
+  created_at: string;
 }
 
 export const dashboardApi = {
