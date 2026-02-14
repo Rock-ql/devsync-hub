@@ -1,12 +1,18 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 interface SSEOptions {
+  events?: string[];
   onMessage?: (event: string, data: string) => void;
   onError?: (error: Event) => void;
 }
 
 export function useSSE(options?: SSEOptions) {
   const sourceRef = useRef<EventSource | null>(null);
+  const optionsRef = useRef<SSEOptions | undefined>(options);
+
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
 
   const connect = useCallback(() => {
     if (sourceRef.current) {
@@ -19,17 +25,24 @@ export function useSSE(options?: SSEOptions) {
       // heartbeat received
     });
 
+    const customEvents = optionsRef.current?.events || [];
+    customEvents.forEach((eventName) => {
+      source.addEventListener(eventName, (event) => {
+        optionsRef.current?.onMessage?.(eventName, (event as MessageEvent).data);
+      });
+    });
+
     source.onmessage = (event) => {
-      options?.onMessage?.("message", event.data);
+      optionsRef.current?.onMessage?.("message", event.data);
     };
 
     source.onerror = (event) => {
-      options?.onError?.(event);
+      optionsRef.current?.onError?.(event);
       // 自动重连由 EventSource 处理
     };
 
     sourceRef.current = source;
-  }, [options]);
+  }, []);
 
   useEffect(() => {
     connect();

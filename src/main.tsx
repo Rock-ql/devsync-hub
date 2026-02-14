@@ -6,12 +6,21 @@ import App from './App'
 import { toast } from './components/ui/toaster'
 import './index.css'
 
+try {
+  const storedTheme = localStorage.getItem('devsync.theme')
+  if (storedTheme === 'dark') {
+    document.documentElement.classList.add('dark')
+  }
+} catch {
+  // ignore
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      staleTime: 5 * 60 * 1000,
-      gcTime: 10 * 60 * 1000,
+      staleTime: 30 * 60 * 1000,
+      gcTime: 60 * 60 * 1000,
       refetchOnWindowFocus: false,
     },
     mutations: {

@@ -2,8 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { dashboardApi, DashboardOverview } from '@/api/dashboard'
-import { FolderGit2, IterationCw, Database, GitCommit, Target } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { FolderGit2, IterationCw, Database, GitCommit, Target, FileText } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -11,8 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { SectionLabel } from '@/components/ui/section-label'
-import { HeroGraphic } from '@/components/hero-graphic'
+import { STATUS_LABEL, STATUS_COLOR, ITER_STATUS_LABEL, ITER_STATUS_TONE } from '@/constants/status'
 
 const easeOut: number[] = [0.16, 1, 0.3, 1]
 
@@ -28,7 +26,7 @@ const fadeInUp = {
 const stagger = {
   hidden: {},
   visible: {
-    transition: { staggerChildren: 0.1, delayChildren: 0.1 },
+    transition: { staggerChildren: 0.08, delayChildren: 0.05 },
   },
 }
 
@@ -41,7 +39,7 @@ export default function Dashboard() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-muted-foreground">加载中...</div>
+        <div className="text-muted-foreground">Loading...</div>
       </div>
     )
   }
@@ -50,105 +48,61 @@ export default function Dashboard() {
     {
       name: '活跃项目',
       value: data?.active_project_count || 0,
-      total: data?.project_count || 0,
       icon: FolderGit2,
-      subValue: null,
+      sub: `${data?.project_count || 0} 个项目`,
     },
     {
       name: '进行中迭代',
       value: data?.active_iteration_count || 0,
-      total: data?.iteration_count || 0,
       icon: IterationCw,
-      subValue: null,
+      sub: `共 ${data?.iteration_count || 0} 个`,
     },
     {
-      name: '待执行SQL',
+      name: '待执行 SQL',
       value: data?.pending_sql_count || 0,
       icon: Database,
-      subValue: data?.pending_sql_count ? `${data.pending_sql_count} 条待处理` : null,
+      sub: data?.pending_sql_count ? '需处理' : '已清零',
     },
     {
       name: '需求总数',
       value: data?.requirement_count || 0,
       icon: Target,
-      subValue: null,
+      sub: null,
     },
     {
       name: '本周提交',
       value: data?.week_commit_count || 0,
-      subValue: `今日 ${data?.today_commit_count || 0}`,
       icon: GitCommit,
+      sub: `今日 ${data?.today_commit_count || 0}`,
     },
   ]
 
+  const totalReq = data?.requirement_status_dist?.reduce((s, i) => s + i.count, 0) || 0
+  const trendMax = Math.max(...(data?.daily_commit_trend?.map(d => d.count) || [1]), 1)
+
   return (
-    <div className="space-y-12">
+    <div className="space-y-6">
+      {/* Stats Row */}
       <motion.section
         variants={stagger}
         initial="hidden"
         animate="visible"
-        className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]"
-      >
-        <motion.div variants={fadeInUp} className="space-y-6">
-          <SectionLabel>OVERVIEW</SectionLabel>
-          <div className="space-y-4">
-            <h1 className="text-4xl font-display leading-[1.1] md:text-5xl lg:text-[3.5rem]">
-              项目进度
-              <span className="relative ml-3 inline-block">
-                <span className="gradient-text">一目了然</span>
-                <span className="gradient-underline" />
-              </span>
-            </h1>
-            <p className="max-w-xl text-lg text-muted-foreground">
-              用更清晰的结构与动态指标，让项目节奏、风险与产出统一掌控。
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Button asChild>
-              <Link to="/projects">查看项目</Link>
-            </Button>
-            <Button variant="secondary" asChild>
-              <Link to="/reports">生成报告</Link>
-            </Button>
-          </div>
-        </motion.div>
-        <motion.div variants={fadeInUp} className="hidden lg:block">
-          <HeroGraphic />
-        </motion.div>
-      </motion.section>
-
-      <motion.section
-        variants={stagger}
-        initial="hidden"
-        whileInView="visible"
-        viewport={{ once: true, amount: 0.2 }}
-        className="grid gap-6 md:grid-cols-2 lg:grid-cols-4"
+        className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5"
       >
         {stats.map((stat) => (
           <motion.div key={stat.name} variants={fadeInUp}>
-            <Card className="group hover:shadow-xl transition-all">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">{stat.name}</p>
-                    <div className="mt-3 flex items-end gap-2">
-                      <span className="text-3xl font-semibold text-foreground">
-                        {stat.value}
-                      </span>
-                      {stat.total !== undefined && (
-                        <span className="text-sm text-muted-foreground">
-                          / {stat.total}
-                        </span>
-                      )}
-                    </div>
-                    {stat.subValue && (
-                      <Badge className="mt-3" variant="soft" tone="info">
-                        {stat.subValue}
-                      </Badge>
+            <Card className="group hover:shadow-lg transition-all">
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between">
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground truncate">{stat.name}</p>
+                    <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
+                    {stat.sub && (
+                      <p className="mt-1 text-xs text-muted-foreground">{stat.sub}</p>
                     )}
                   </div>
-                  <div className="rounded-xl bg-gradient-to-br from-[hsl(var(--accent))] to-[hsl(var(--accent-secondary))] p-3 shadow-accent transition group-hover:shadow-accent-lg">
-                    <stat.icon className="h-6 w-6 text-white" />
+                  <div className="shrink-0 rounded-lg bg-gradient-to-br from-[hsl(var(--accent))] to-[hsl(var(--accent-secondary))] p-2.5 shadow-accent transition group-hover:shadow-accent-lg">
+                    <stat.icon className="h-5 w-5 text-white" />
                   </div>
                 </div>
               </CardContent>
@@ -157,64 +111,86 @@ export default function Dashboard() {
         ))}
       </motion.section>
 
+      {/* Row 2: Requirement Status + Commit Trend */}
       <motion.section
         variants={stagger}
         initial="hidden"
         whileInView="visible"
         viewport={{ once: true, amount: 0.2 }}
-        className="relative overflow-hidden rounded-3xl bg-foreground text-background"
+        className="grid gap-6 lg:grid-cols-2"
       >
-        <div className="absolute inset-0 dot-pattern opacity-40" />
-        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[hsl(var(--accent))]/15 blur-[140px]" />
-        <div className="relative p-8 lg:p-10">
-          <motion.div variants={fadeInUp} className="space-y-3">
-            <SectionLabel className="border-white/20 bg-white/5">
-              INSIGHTS
-            </SectionLabel>
-            <h2 className="text-3xl font-display text-white">关键态势</h2>
-            <p className="max-w-2xl text-white/70">
-              关键指标集中展示，帮助团队把控风险与交付节奏。
-            </p>
-          </motion.div>
-          <motion.div
-            variants={stagger}
-            className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-          >
-            {[
-              {
-                label: '活跃项目',
-                value: data?.active_project_count || 0,
-              },
-              {
-                label: '进行中迭代',
-                value: data?.active_iteration_count || 0,
-              },
-              {
-                label: '待执行 SQL',
-                value: data?.pending_sql_count || 0,
-              },
-              {
-                label: '本周提交',
-                value: data?.week_commit_count || 0,
-              },
-            ].map((item) => (
-              <motion.div
-                key={item.label}
-                variants={fadeInUp}
-                className="rounded-2xl border border-white/10 bg-white/5 p-4"
-              >
-                <p className="text-xs uppercase tracking-[0.2em] text-white/60 font-mono">
-                  {item.label}
-                </p>
-                <p className="mt-3 text-2xl font-semibold text-white">
-                  {item.value}
-                </p>
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
+        {/* Requirement Status Distribution */}
+        <motion.div variants={fadeInUp}>
+          <Card className="h-full">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">需求状态分布</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {totalReq > 0 ? (
+                <div className="space-y-4">
+                  <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+                    {data!.requirement_status_dist.map((item) => (
+                      <div
+                        key={item.status}
+                        className={`${STATUS_COLOR[item.status] || 'bg-zinc-300'} transition-all`}
+                        style={{ width: `${(item.count / totalReq) * 100}%` }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-x-5 gap-y-2">
+                    {data!.requirement_status_dist.map((item) => (
+                      <div key={item.status} className="flex items-center gap-2 text-sm">
+                        <span className={`h-2.5 w-2.5 rounded-full ${STATUS_COLOR[item.status] || 'bg-zinc-300'}`} />
+                        <span className="text-muted-foreground">
+                          {STATUS_LABEL[item.status] || item.status}
+                        </span>
+                        <span className="font-medium">{item.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <EmptyPlaceholder text="暂无需求数据" />
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* 7-day Commit Trend */}
+        <motion.div variants={fadeInUp}>
+          <Card className="h-full">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">近 7 天提交趋势</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {data?.daily_commit_trend?.length ? (
+                <div className="flex items-end gap-2 h-32">
+                  {data.daily_commit_trend.map((d) => {
+                    const pct = trendMax > 0 ? (d.count / trendMax) * 100 : 0
+                    const weekday = new Date(d.date + 'T00:00:00').toLocaleDateString('zh-CN', { weekday: 'short' })
+                    return (
+                      <div key={d.date} className="flex-1 flex flex-col items-center gap-1.5">
+                        <span className="text-xs font-medium text-foreground">{d.count || ''}</span>
+                        <div className="w-full relative rounded-t-md bg-muted overflow-hidden" style={{ height: '80px' }}>
+                          <div
+                            className="absolute bottom-0 w-full rounded-t-md bg-gradient-to-t from-[hsl(var(--accent))] to-[hsl(var(--accent-secondary))] transition-all"
+                            style={{ height: `${Math.max(pct, d.count > 0 ? 8 : 0)}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground">{weekday}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <EmptyPlaceholder text="暂无提交数据" />
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
       </motion.section>
 
+      {/* Row 3: Recent Projects + Recent Iterations */}
       <motion.section
         variants={stagger}
         initial="hidden"
@@ -224,36 +200,32 @@ export default function Dashboard() {
       >
         <motion.div variants={fadeInUp}>
           <Card className="h-full">
-            <CardHeader>
-              <CardTitle>最近项目</CardTitle>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">最近项目</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-2">
               {data?.recent_projects?.length ? (
                 data.recent_projects.map((project) => (
                   <div
                     key={project.id}
-                    className="flex items-center justify-between rounded-xl border border-border/60 bg-background/60 px-4 py-3 transition hover:bg-muted/60"
+                    className="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-4 py-2.5 transition hover:bg-muted/60"
                   >
-                    <div>
-                      <p className="font-medium text-foreground">
-                        {project.name}
-                      </p>
-                    </div>
+                    <Link to="/projects" className="font-medium text-sm text-foreground truncate mr-3 hover:underline">
+                      {project.name}
+                    </Link>
                     {project.pending_sql_count > 0 ? (
-                      <Badge tone="warning" variant="soft">
-                        {project.pending_sql_count} 条 SQL
+                      <Badge tone="warning" variant="soft" className="shrink-0">
+                        {project.pending_sql_count} SQL
                       </Badge>
                     ) : (
-                      <Badge tone="success" variant="soft">
-                        全部清零
+                      <Badge tone="success" variant="soft" className="shrink-0">
+                        已清零
                       </Badge>
                     )}
                   </div>
                 ))
               ) : (
-                <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                  暂无项目
-                </div>
+                <EmptyPlaceholder text="暂无项目" />
               )}
             </CardContent>
           </Card>
@@ -261,33 +233,114 @@ export default function Dashboard() {
 
         <motion.div variants={fadeInUp}>
           <Card className="h-full">
-            <CardHeader>
-              <CardTitle>待执行 SQL</CardTitle>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">最近迭代</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {data?.pending_sql_by_project?.length ? (
-                data.pending_sql_by_project.map((item) => (
+            <CardContent className="space-y-2">
+              {data?.recent_iterations?.length ? (
+                data.recent_iterations.map((iter) => (
                   <div
-                    key={item.project_id}
-                    className="flex items-center justify-between rounded-xl border border-border/60 bg-background/60 px-4 py-3 transition hover:bg-muted/60"
+                    key={iter.id}
+                    className="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-4 py-2.5 transition hover:bg-muted/60"
                   >
-                    <span className="font-medium text-foreground">
-                      {item.project_name}
-                    </span>
-                    <Badge tone="warning" variant="soft">
-                      {item.count} 条
+                    <Link to="/iterations" className="font-medium text-sm text-foreground truncate mr-3 hover:underline">
+                      {iter.name}
+                    </Link>
+                    <Badge
+                      tone={ITER_STATUS_TONE[iter.status] || 'info'}
+                      variant="soft"
+                      className="shrink-0"
+                    >
+                      {ITER_STATUS_LABEL[iter.status] || iter.status}
                     </Badge>
                   </div>
                 ))
               ) : (
-                <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                  无待执行 SQL
-                </div>
+                <EmptyPlaceholder text="暂无迭代" />
               )}
             </CardContent>
           </Card>
         </motion.div>
       </motion.section>
+
+      {/* Row 4: Pending SQL + Recent Reports */}
+      <motion.section
+        variants={stagger}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+        className="grid gap-6 lg:grid-cols-2"
+      >
+        <motion.div variants={fadeInUp}>
+          <Card className="h-full">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">待执行 SQL</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {data?.pending_sql_by_project?.length ? (
+                data.pending_sql_by_project.map((item) => (
+                  <div
+                    key={item.project_id}
+                    className="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-4 py-2.5 transition hover:bg-muted/60"
+                  >
+                    <span className="font-medium text-sm text-foreground truncate mr-3">
+                      {item.project_name}
+                    </span>
+                    <Badge tone="warning" variant="soft" className="shrink-0">
+                      {item.count} 条
+                    </Badge>
+                  </div>
+                ))
+              ) : (
+                <EmptyPlaceholder text="无待执行 SQL" />
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div variants={fadeInUp}>
+          <Card className="h-full">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">最近报告</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {data?.recent_reports?.length ? (
+                data.recent_reports.map((rpt) => (
+                  <div
+                    key={rpt.id}
+                    className="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-4 py-2.5 transition hover:bg-muted/60"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <Link to="/reports" className="text-sm text-foreground truncate hover:underline">
+                        {rpt.title || (rpt.type === 'daily' ? '日报' : '周报')}
+                      </Link>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant="soft" tone={rpt.type === 'daily' ? 'info' : 'success'}>
+                        {rpt.type === 'daily' ? '日报' : '周报'}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {rpt.created_at?.slice(0, 10)}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <EmptyPlaceholder text="暂无报告" />
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      </motion.section>
+    </div>
+  )
+}
+
+function EmptyPlaceholder({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+      {text}
     </div>
   )
 }

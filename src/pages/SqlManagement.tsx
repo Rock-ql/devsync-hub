@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { PageResult } from '@/api'
 import { sqlApi, PendingSqlDetail } from '@/api/sql'
@@ -18,6 +18,8 @@ import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
 import { EnvExecutionButtons, EnvExecutionItem } from '@/components/sql/EnvExecutionButtons'
 import { ExecuteConfirmDialog } from '@/components/sql/ExecuteConfirmDialog'
 import RequirementLinkDialog from '@/components/requirement/RequirementLinkDialog'
+import { useSqlStore } from '@/stores/useSqlStore'
+import { SQL_STATUS_LABEL } from '@/constants/status'
 
 const FIXED_ENV_OPTIONS = [
   { envCode: 'local', envName: 'local' },
@@ -27,39 +29,33 @@ const FIXED_ENV_OPTIONS = [
   { envCode: 'prod', envName: 'prod' },
 ]
 
-const STATUS_DESC_MAP: Record<string, string> = {
-  pending: '待执行',
-  partial: '部分执行',
-  completed: '全部完成',
-}
-
 export default function SqlManagement() {
   const queryClient = useQueryClient()
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [selectedStatus, setSelectedStatus] = useState<string>('')
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('')
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [editForm, setEditForm] = useState({ title: '', content: '', remark: '' })
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
-  const [executeDialogOpen, setExecuteDialogOpen] = useState(false)
-  const [executeDialogMode, setExecuteDialogMode] = useState<'execute' | 'detail'>('execute')
-  const [selectedEnv, setSelectedEnv] = useState<EnvExecutionItem | null>(null)
-  const [selectedSql, setSelectedSql] = useState<PendingSqlDetail | null>(null)
-  const [executeEnvCode, setExecuteEnvCode] = useState('')
-  const [executeRemark, setExecuteRemark] = useState('')
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
-  const [previewSql, setPreviewSql] = useState<PendingSqlDetail | null>(null)
-  const [linkDialogOpen, setLinkDialogOpen] = useState(false)
-  const [linkSqlId, setLinkSqlId] = useState<number | null>(null)
-  const [formData, setFormData] = useState({
-    projectId: '',
-    iterationId: '',
-    title: '',
-    content: '',
-    remark: '',
-  })
+
+  // --- Zustand store (selector 精确订阅) ---
+  const isModalOpen = useSqlStore((s) => s.isModalOpen)
+  const selectedStatus = useSqlStore((s) => s.selectedStatus)
+  const selectedProjectId = useSqlStore((s) => s.selectedProjectId)
+  const editingId = useSqlStore((s) => s.editingId)
+  const editForm = useSqlStore((s) => s.editForm)
+  const hasUnsavedChanges = useSqlStore((s) => s.hasUnsavedChanges)
+  const executeDialogOpen = useSqlStore((s) => s.executeDialogOpen)
+  const executeDialogMode = useSqlStore((s) => s.executeDialogMode)
+  const selectedEnv = useSqlStore((s) => s.selectedEnv)
+  const selectedSql = useSqlStore((s) => s.selectedSql)
+  const executeEnvCode = useSqlStore((s) => s.executeEnvCode)
+  const executeRemark = useSqlStore((s) => s.executeRemark)
+  const previewDialogOpen = useSqlStore((s) => s.previewDialogOpen)
+  const previewSql = useSqlStore((s) => s.previewSql)
+  const linkDialogOpen = useSqlStore((s) => s.linkDialogOpen)
+  const linkSqlId = useSqlStore((s) => s.linkSqlId)
+  const formData = useSqlStore((s) => s.formData)
+
+  const store = useSqlStore
+
   const { confirmLeave } = useUnsavedWarning(hasUnsavedChanges)
 
+  // --- React Query (服务端状态) ---
   const { data: sqlList, isLoading } = useQuery<PageResult<PendingSqlDetail>>({
     queryKey: ['pending-sql', selectedStatus, selectedProjectId],
     queryFn: () => sqlApi.list({
@@ -85,8 +81,8 @@ export default function SqlManagement() {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
-      setIsModalOpen(false)
-      resetForm()
+      store.getState().closeAddModal()
+      store.getState().resetForm()
     },
   })
 
@@ -95,8 +91,7 @@ export default function SqlManagement() {
       sqlApi.update(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
-      setEditingId(null)
-      setHasUnsavedChanges(false)
+      store.getState().clearEdit()
     },
   })
 
@@ -105,10 +100,7 @@ export default function SqlManagement() {
       sqlApi.execute({ id, env, remark }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
-      setExecuteDialogOpen(false)
-      setExecuteRemark('')
-      setSelectedEnv(null)
-      setSelectedSql(null)
+      store.getState().closeExecuteDialog()
     },
   })
 
@@ -117,10 +109,7 @@ export default function SqlManagement() {
       sqlApi.revokeExecution({ sql_id: sqlId, env }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
-      setExecuteDialogOpen(false)
-      setExecuteRemark('')
-      setSelectedEnv(null)
-      setSelectedSql(null)
+      store.getState().closeExecuteDialog()
     },
   })
 
@@ -131,32 +120,20 @@ export default function SqlManagement() {
     },
   })
 
-  const resetForm = () => {
-    setFormData({ projectId: '', iterationId: '', title: '', content: '', remark: '' })
-  }
-
+  // --- Handlers ---
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     addMutation.mutate(formData)
   }
 
   const handleStartEdit = (sql: PendingSqlDetail) => {
-    if (editingId && editingId !== sql.id && !confirmLeave()) {
-      return
-    }
-    setEditingId(sql.id)
-    setEditForm({
-      title: sql.title,
-      content: sql.content,
-      remark: sql.remark || '',
-    })
-    setHasUnsavedChanges(false)
+    if (editingId && editingId !== sql.id && !confirmLeave()) return
+    store.getState().startEdit(sql)
   }
 
   const handleCancelEdit = () => {
     if (hasUnsavedChanges && !confirmLeave()) return
-    setEditingId(null)
-    setHasUnsavedChanges(false)
+    store.getState().cancelEdit()
   }
 
   const handleSaveEdit = () => {
@@ -164,9 +141,7 @@ export default function SqlManagement() {
     const editingSql = sqlList?.records.find((item) => item.id === editingId)
     const editingEnvItems = buildEnvItems(editingSql)
     if (editingEnvItems.some((item) => item.executed)) {
-      if (!confirm('该SQL已在部分环境执行，修改不影响已有执行记录，是否继续？')) {
-        return
-      }
+      if (!confirm('该SQL已在部分环境执行，修改不影响已有执行记录，是否继续？')) return
     }
     updateMutation.mutate({
       id: editingId,
@@ -198,30 +173,18 @@ export default function SqlManagement() {
       || envOptions[0]?.envCode
       || ''
     const env = envOptions.find((item) => item.envCode === defaultEnvCode) || null
-
-    setSelectedSql(sql)
-    setSelectedEnv(env)
-    setExecuteEnvCode(defaultEnvCode)
-    setExecuteDialogMode('execute')
-    setExecuteRemark('')
-    setExecuteDialogOpen(true)
-  }
-
-  const handleModalChange = (open: boolean) => {
-    setIsModalOpen(open)
-    if (!open) {
-      resetForm()
+    if (env) {
+      store.getState().openExecuteDialog(sql, env, 'execute')
     }
   }
 
-  const handlePreviewSql = (sql: PendingSqlDetail) => {
-    setPreviewSql(sql)
-    setPreviewDialogOpen(true)
-  }
-
-  const handleOpenLink = (sqlId: number) => {
-    setLinkSqlId(sqlId)
-    setLinkDialogOpen(true)
+  const handleModalChange = (open: boolean) => {
+    if (open) {
+      store.getState().openAddModal()
+    } else {
+      store.getState().closeAddModal()
+      store.getState().resetForm()
+    }
   }
 
   if (isLoading) {
@@ -239,13 +202,10 @@ export default function SqlManagement() {
           </div>
         </div>
         <Button onClick={() => {
-          if (editingId && hasUnsavedChanges && !confirmLeave()) {
-            return
-          }
-          setEditingId(null)
-          setHasUnsavedChanges(false)
-          resetForm()
-          setIsModalOpen(true)
+          if (editingId && hasUnsavedChanges && !confirmLeave()) return
+          store.getState().clearEdit()
+          store.getState().resetForm()
+          store.getState().openAddModal()
         }}>
           <Plus className="h-4 w-4" />
           新增 SQL
@@ -256,7 +216,7 @@ export default function SqlManagement() {
         <CardContent className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
             <Label>项目筛选</Label>
-            <Select value={selectedProjectId || 'all'} onValueChange={(value) => setSelectedProjectId(value === 'all' ? '' : value)}>
+            <Select value={selectedProjectId || 'all'} onValueChange={(value) => store.getState().setSelectedProjectId(value === 'all' ? '' : value)}>
               <SelectTrigger>
                 <SelectValue placeholder="全部项目" />
               </SelectTrigger>
@@ -272,7 +232,7 @@ export default function SqlManagement() {
           </div>
           <div className="space-y-2">
             <Label>状态筛选</Label>
-            <Select value={selectedStatus || 'all'} onValueChange={(value) => setSelectedStatus(value === 'all' ? '' : value)}>
+            <Select value={selectedStatus || 'all'} onValueChange={(value) => store.getState().setSelectedStatus(value === 'all' ? '' : value)}>
               <SelectTrigger>
                 <SelectValue placeholder="全部状态" />
               </SelectTrigger>
@@ -293,7 +253,7 @@ export default function SqlManagement() {
             const envItems = buildEnvItems(sql)
             const executedCount = envItems.filter((item) => item.executed).length
             const isEditing = editingId === sql.id
-            const statusDesc = STATUS_DESC_MAP[sql.execution_status] || sql.execution_status
+            const statusDesc = SQL_STATUS_LABEL[sql.execution_status] || sql.execution_status
             return (
               <Card
                 key={sql.id}
@@ -307,18 +267,12 @@ export default function SqlManagement() {
                     <CardHeader className="space-y-3">
                       <Input
                         value={editForm.title}
-                        onChange={(e) => {
-                          setEditForm({ ...editForm, title: e.target.value })
-                          setHasUnsavedChanges(true)
-                        }}
+                        onChange={(e) => store.getState().setEditForm({ title: e.target.value })}
                         maxLength={200}
                         required
                       />
                       <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                        <Badge
-                          variant="soft"
-                          tone={sql.execution_status === 'completed' ? 'success' : 'warning'}
-                        >
+                        <Badge variant="soft" tone={sql.execution_status === 'completed' ? 'success' : 'warning'}>
                           {statusDesc}
                         </Badge>
                         <span>
@@ -329,20 +283,14 @@ export default function SqlManagement() {
                     <CardContent className="space-y-4">
                       <Textarea
                         value={editForm.content}
-                        onChange={(e) => {
-                          setEditForm({ ...editForm, content: e.target.value })
-                          setHasUnsavedChanges(true)
-                        }}
+                        onChange={(e) => store.getState().setEditForm({ content: e.target.value })}
                         rows={12}
                         className="max-h-[520px] min-h-[320px] resize-y overflow-y-auto font-mono text-sm"
                         required
                       />
                       <Textarea
                         value={editForm.remark}
-                        onChange={(e) => {
-                          setEditForm({ ...editForm, remark: e.target.value })
-                          setHasUnsavedChanges(true)
-                        }}
+                        onChange={(e) => store.getState().setEditForm({ remark: e.target.value })}
                         rows={2}
                         placeholder="备注"
                       />
@@ -362,10 +310,7 @@ export default function SqlManagement() {
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-3">
                           <CardTitle>{sql.title}</CardTitle>
-                          <Badge
-                            variant="soft"
-                            tone={sql.execution_status === 'completed' ? 'success' : 'warning'}
-                          >
+                          <Badge variant="soft" tone={sql.execution_status === 'completed' ? 'success' : 'warning'}>
                             {statusDesc}
                           </Badge>
                         </div>
@@ -382,36 +327,16 @@ export default function SqlManagement() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-9 w-9 p-0"
-                          onClick={() => handlePreviewSql(sql)}
-                          aria-label="查看 SQL 详情"
-                        >
+                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => store.getState().openPreview(sql)} aria-label="查看 SQL 详情">
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-9 w-9 p-0"
-                          onClick={() => handleStartEdit(sql)}
-                          aria-label="编辑 SQL"
-                        >
+                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => handleStartEdit(sql)} aria-label="编辑 SQL">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleOpenLink(sql.id)}
-                        >
+                        <Button variant="secondary" size="sm" onClick={() => store.getState().openLinkDialog(sql.id)}>
                           关联需求
                         </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleOpenExecute(sql)}
-                        >
+                        <Button variant="secondary" size="sm" onClick={() => handleOpenExecute(sql)}>
                           执行
                         </Button>
                         <Button
@@ -419,9 +344,7 @@ export default function SqlManagement() {
                           size="sm"
                           className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
                           onClick={() => {
-                            if (confirm('确定要删除此 SQL 吗？')) {
-                              deleteMutation.mutate(sql.id)
-                            }
+                            if (confirm('确定要删除此 SQL 吗？')) deleteMutation.mutate(sql.id)
                           }}
                           aria-label="删除 SQL"
                         >
@@ -433,15 +356,12 @@ export default function SqlManagement() {
                       <pre className="max-h-56 overflow-y-auto rounded-xl border border-border/60 bg-muted/60 p-4 text-sm text-foreground overflow-x-auto">
                         {sql.content}
                       </pre>
-
                       <EnvExecutionButtons
                         items={envItems}
                         executedCount={executedCount}
                         envTotal={envItems.length}
                         showAddEnv={false}
-                        onExecute={(envCode) => {
-                          handleOpenExecute(sql, envCode)
-                        }}
+                        onExecute={(envCode) => handleOpenExecute(sql, envCode)}
                         onDetail={(envCode) => {
                           const envExec = sql.env_executions?.find((item) => item.env_code === envCode)
                           if (!envExec) return
@@ -453,20 +373,14 @@ export default function SqlManagement() {
                             executor: envExec.executor ?? undefined,
                             remark: envExec.remark ?? undefined,
                           }
-                          setSelectedSql(sql)
-                          setSelectedEnv(mapped)
-                          setExecuteDialogMode('detail')
-                          setExecuteRemark(envExec.remark || '')
-                          setExecuteDialogOpen(true)
+                          store.getState().openExecuteDialog(sql, mapped, 'detail')
                         }}
                       />
-
                       {sql.executed_at && (
                         <p className="text-xs text-muted-foreground">
                           最近执行时间: {sql.executed_at} | 环境: {sql.executed_env}
                         </p>
                       )}
-
                       {sql.remark && (
                         <p className="text-sm text-muted-foreground">备注: {sql.remark}</p>
                       )}
@@ -495,26 +409,19 @@ export default function SqlManagement() {
         executedAt={selectedEnv?.executedAt}
         executor={selectedEnv?.executor}
         remark={executeRemark}
-        onRemarkChange={setExecuteRemark}
-        onClose={() => {
-          setExecuteDialogOpen(false)
-          setSelectedEnv(null)
-          setSelectedSql(null)
-          setExecuteRemark('')
-          setExecuteEnvCode('')
-        }}
+        onRemarkChange={(v) => store.getState().setExecuteRemark(v)}
+        onClose={() => store.getState().closeExecuteDialog()}
         onConfirm={() => {
           if (!selectedSql) return
-          if (!executeEnvCode) {
-            alert('请选择执行环境')
-            return
-          }
+          if (!executeEnvCode) { alert('请选择执行环境'); return }
           executeMutation.mutate({ id: selectedSql.id, env: executeEnvCode, remark: executeRemark })
         }}
         onEnvChange={(value) => {
-          setExecuteEnvCode(value)
+          store.getState().setExecuteEnvCode(value)
           const env = buildEnvItems(selectedSql).find((item) => item.envCode === value) || null
-          setSelectedEnv(env)
+          if (env) {
+            store.getState().openExecuteDialog(selectedSql!, env, executeDialogMode)
+          }
         }}
         onRevoke={() => {
           if (!selectedEnv || !selectedSql) return
@@ -523,10 +430,7 @@ export default function SqlManagement() {
       />
 
       <Dialog open={previewDialogOpen} onOpenChange={(open) => {
-        setPreviewDialogOpen(open)
-        if (!open) {
-          setPreviewSql(null)
-        }
+        if (!open) store.getState().closePreview()
       }}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
@@ -547,10 +451,7 @@ export default function SqlManagement() {
       <RequirementLinkDialog
         open={linkDialogOpen}
         onOpenChange={(open) => {
-          setLinkDialogOpen(open)
-          if (!open) {
-            setLinkSqlId(null)
-          }
+          if (!open) store.getState().closeLinkDialog()
         }}
         sqlId={linkSqlId || undefined}
         onLinked={() => {
@@ -567,7 +468,7 @@ export default function SqlManagement() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>所属项目 *</Label>
-                <Select value={formData.projectId ? String(formData.projectId) : undefined} onValueChange={(value) => setFormData({ ...formData, projectId: value })}>
+                <Select value={formData.projectId ? String(formData.projectId) : undefined} onValueChange={(value) => store.getState().setFormData({ projectId: value })}>
                   <SelectTrigger>
                     <SelectValue placeholder="请选择项目" />
                   </SelectTrigger>
@@ -585,7 +486,7 @@ export default function SqlManagement() {
                 <Input
                   type="number"
                   value={formData.iterationId}
-                  onChange={(e) => setFormData({ ...formData, iterationId: e.target.value })}
+                  onChange={(e) => store.getState().setFormData({ iterationId: e.target.value })}
                   placeholder="迭代 ID（可选）"
                 />
               </div>
@@ -594,7 +495,7 @@ export default function SqlManagement() {
               <Label>SQL 标题 *</Label>
               <Input
                 value={formData.title}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                onChange={(e) => store.getState().setFormData({ title: e.target.value })}
                 required
               />
             </div>
@@ -602,7 +503,7 @@ export default function SqlManagement() {
               <Label>SQL 内容 *</Label>
               <Textarea
                 value={formData.content}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                onChange={(e) => store.getState().setFormData({ content: e.target.value })}
                 rows={8}
                 className="font-mono text-sm"
                 required
@@ -612,16 +513,12 @@ export default function SqlManagement() {
               <Label>备注</Label>
               <Textarea
                 value={formData.remark}
-                onChange={(e) => setFormData({ ...formData, remark: e.target.value })}
+                onChange={(e) => store.getState().setFormData({ remark: e.target.value })}
                 rows={2}
               />
             </div>
             <DialogFooter className="pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => handleModalChange(false)}
-              >
+              <Button type="button" variant="secondary" onClick={() => handleModalChange(false)}>
                 取消
               </Button>
               <Button type="submit" disabled={addMutation.isPending || updateMutation.isPending}>
