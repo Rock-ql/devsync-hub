@@ -3,11 +3,24 @@ use crate::AppState;
 use crate::error::AppResult;
 use crate::models::requirement::*;
 use crate::services::requirement_service;
+use crate::models::common::PageResult;
 
 #[tauri::command]
 pub async fn list_requirements(state: State<'_, AppState>, req: RequirementListReq) -> AppResult<Vec<RequirementDetailRsp>> {
     let db = state.db.lock().await;
     requirement_service::list_requirements(&db.conn, &req)
+}
+
+#[tauri::command]
+pub async fn list_requirements_page(state: State<'_, AppState>, req: RequirementPageReq) -> AppResult<PageResult<RequirementDetailRsp>> {
+    let db = state.db.lock().await;
+    requirement_service::list_requirements_page(&db.conn, &req)
+}
+
+#[tauri::command]
+pub async fn list_requirement_commits(state: State<'_, AppState>, req: RequirementCommitListReq) -> AppResult<PageResult<RequirementCommitRsp>> {
+    let db = state.db.lock().await;
+    requirement_service::list_requirement_commits(&db.conn, &req)
 }
 
 #[tauri::command]

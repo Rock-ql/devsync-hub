@@ -4,6 +4,7 @@ version = "2.0.0"
 description = "DevSync Hub - 跨平台项目进度管理桌面客户端"
 authors = ["rockcoder"]
 edition = "2021"
+default-run = "devsync-hub"
 
 [lib]
 name = "devsync_hub_lib"
@@ -30,7 +31,7 @@ thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
 base64 = "0.22"
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
 
 [features]

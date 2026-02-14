@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{AppError, AppResult};
 use crate::models::report::*;
 use crate::models::common::PageResult;
@@ -107,23 +107,30 @@ pub fn generate_report_prepare(conn: &Connection, req: &ReportGenerateReq) -> Ap
             (weekly_summary, daily_project_work)
         } else {
             log::info!("[报告生成] 周报无可用日报，回退到Git提交记录");
-            let commits = query_commits(conn, req)?;
-            let project_commits = build_project_commits(&commits);
-            (format_commits_text(&project_commits), project_commits)
+            match query_commits(conn, req) {
+                Ok(commits) => {
+                    let pc = build_project_commits(&commits);
+                    (format_commits_text(&pc), pc)
+                }
+                Err(_) => (String::new(), HashMap::new()),
+            }
         }
     } else {
-        // 日报：必须基于 Git 提交记录生成
-        let commits = query_commits(conn, req)?;
-        let project_commits = build_project_commits(&commits);
-        let structured_input = match build_daily_summary_by_requirement(conn, &commits) {
-            Ok(text) => text,
-            Err(err) => {
-                log::warn!("[报告生成] 构建日报结构化输入失败，回退到Git提交: {}", err);
-                format_commits_text(&project_commits)
+        // 日报：基于 Git 提交记录生成，无提交时直接插入空报告
+        match query_commits(conn, req) {
+            Ok(commits) => {
+                let project_commits = build_project_commits(&commits);
+                let structured_input = match build_daily_summary_by_requirement(conn, &commits) {
+                    Ok(text) => text,
+                    Err(err) => {
+                        log::warn!("[报告生成] 构建日报结构化输入失败，回退到Git提交: {}", err);
+                        format_commits_text(&project_commits)
+                    }
+                };
+                (structured_input, project_commits)
             }
-        };
-
-        (structured_input, project_commits)
+            Err(_) => (String::new(), HashMap::new()),
+        }
     };
 
     let commit_summary = serde_json::to_string(&project_commits).unwrap_or_default();
@@ -168,12 +175,12 @@ fn query_commits(conn: &Connection, req: &ReportGenerateReq) -> AppResult<Vec<Co
         INNER JOIN project p ON gc.project_id = p.id \
         WHERE gc.state = 1 AND gc.deleted_at IS NULL \
           AND p.state = 1 AND p.deleted_at IS NULL \
-          AND gc.committed_at >= ? AND gc.committed_at <= ?"
+          AND SUBSTR(gc.committed_at, 1, 10) >= ? AND SUBSTR(gc.committed_at, 1, 10) <= ?"
         .to_string();
 
     let mut pv: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
-        Box::new(format!("{} 00:00:00", req.start_date)),
-        Box::new(format!("{} 23:59:59", req.end_date)),
+        Box::new(req.start_date.clone()),
+        Box::new(req.end_date.clone()),
     ];
 
     if let Some(email) = &req.author_email {
@@ -732,7 +739,6 @@ fn is_merge_commit(message: &str) -> bool {
         || normalized.starts_with("merge remote-tracking branch")
         || normalized.starts_with("merge pull request")
         || normalized.starts_with("merge !")
-        || normalized.starts_with("merge ")
 }
 
 fn build_daily_template_reference(template: &str) -> String {
@@ -1010,7 +1016,50 @@ fn looks_like_project_title(candidate: &str) -> bool {
     true
 }
 
-pub fn generate_report_insert(conn: &Connection, req: &ReportGenerateReq, ctx: &GenerateReportContext, content: &str) -> AppResult<Report> {
+pub fn find_existing_report(conn: &Connection, req: &ReportGenerateReq) -> AppResult<Option<Report>> {
+    let existing_id: Option<i32> = conn
+        .query_row(
+            "SELECT id FROM report WHERE type = ? AND start_date = ? AND end_date = ? AND state = 1 AND deleted_at IS NULL ORDER BY id DESC LIMIT 1",
+            params![req.r#type, req.start_date, req.end_date],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let Some(id) = existing_id else {
+        return Ok(None);
+    };
+
+    // 如果历史数据存在重复记录，保留最新一条，其余做软删除，避免前端只取到旧记录
+    let cleaned = conn.execute(
+        "UPDATE report SET deleted_at = datetime('now','localtime'), state = 0 WHERE type = ? AND start_date = ? AND end_date = ? AND id != ? AND state = 1 AND deleted_at IS NULL",
+        params![req.r#type, req.start_date, req.end_date, id],
+    )?;
+    if cleaned > 0 {
+        log::info!(
+            "[报告生成] 检测到重复报告，已清理 {} 条: type={}, {}~{}",
+            cleaned,
+            req.r#type,
+            req.start_date,
+            req.end_date
+        );
+    }
+
+    Ok(Some(get_report_detail(conn, id)?))
+}
+
+pub fn generate_report_upsert(conn: &Connection, req: &ReportGenerateReq, ctx: &GenerateReportContext, content: &str) -> AppResult<Report> {
+    if let Some(existing) = find_existing_report(conn, req)? {
+        if req.force {
+            let title = format!("{} ({} ~ {})", ctx.type_label, req.start_date, req.end_date);
+            conn.execute(
+                "UPDATE report SET title = ?, content = ?, commit_summary = ?, updated_at = datetime('now','localtime') WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+                params![title, content, ctx.commit_summary, existing.id],
+            )?;
+            return get_report_detail(conn, existing.id);
+        }
+        return Ok(existing);
+    }
+
     let title = format!("{} ({} ~ {})", ctx.type_label, req.start_date, req.end_date);
     conn.execute(
         "INSERT INTO report (type, title, content, start_date, end_date, commit_summary) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1026,6 +1075,15 @@ pub fn generate_fallback(
     project_commits: &HashMap<String, Vec<String>>,
     type_label: &str,
 ) -> String {
+    let is_empty = structured_input.trim().is_empty() && project_commits.is_empty();
+    if is_empty {
+        return if report_type == "weekly" {
+            "本周暂无工作内容".to_string()
+        } else {
+            "今日暂无工作内容".to_string()
+        };
+    }
+
     if report_type == "daily" {
         let normalized = structured_input.trim();
         if !normalized.is_empty() {
@@ -1166,6 +1224,7 @@ mod tests {
             r#type: "weekly".to_string(),
             start_date: "2026-02-01".to_string(),
             end_date: "2026-02-07".to_string(),
+            force: false,
             author_email: None,
             project_ids: None,
         };

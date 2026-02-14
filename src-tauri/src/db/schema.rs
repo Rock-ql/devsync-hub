@@ -210,5 +210,11 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             ON git_commit(project_id, commit_id);
     ")?;
 
+    // 修复 committed_at 中 RFC3339 格式为统一的 'YYYY-MM-DD HH:MM:SS' 格式
+    conn.execute_batch("
+        UPDATE git_commit SET committed_at = REPLACE(SUBSTR(committed_at, 1, 19), 'T', ' ')
+        WHERE committed_at LIKE '%T%';
+    ")?;
+
     Ok(())
 }

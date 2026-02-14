@@ -49,6 +49,8 @@ pub fn run() {
             commands::iteration_cmd::update_iteration_status,
             // Requirement
             commands::requirement_cmd::list_requirements,
+            commands::requirement_cmd::list_requirements_page,
+            commands::requirement_cmd::list_requirement_commits,
             commands::requirement_cmd::add_requirement,
             commands::requirement_cmd::update_requirement,
             commands::requirement_cmd::update_requirement_status,
@@ -63,7 +65,12 @@ pub fn run() {
             commands::sql_cmd::delete_sql,
             commands::sql_cmd::execute_sql,
             commands::sql_cmd::batch_execute_sql,
+            commands::sql_cmd::batch_delete_sql,
             commands::sql_cmd::revoke_execution,
+            commands::sql_cmd::list_sql_env_configs,
+            commands::sql_cmd::add_sql_env_config,
+            commands::sql_cmd::update_sql_env_config,
+            commands::sql_cmd::delete_sql_env_config,
             // Report
             commands::report_cmd::list_reports,
             commands::report_cmd::get_report_detail,

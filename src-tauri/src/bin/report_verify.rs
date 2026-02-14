@@ -55,6 +55,7 @@ fn main() {
         r#type: "daily".to_string(),
         start_date: start_date.to_string(),
         end_date: end_date.to_string(),
+        force: false,
         author_email,
         project_ids: None,
     };

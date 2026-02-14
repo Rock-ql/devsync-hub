@@ -26,6 +26,31 @@ pub struct SqlEnvConfig {
     pub sort_order: i32,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SqlEnvConfigListReq {
+    pub project_id: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SqlEnvConfigAddReq {
+    pub project_id: i32,
+    pub env_code: String,
+    pub env_name: String,
+    #[serde(default)]
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SqlEnvConfigUpdateReq {
+    pub id: i32,
+    #[serde(default)]
+    pub env_code: Option<String>,
+    #[serde(default)]
+    pub env_name: Option<String>,
+    #[serde(default)]
+    pub sort_order: Option<i32>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SqlExecutionLog {
     pub id: i32,
@@ -95,6 +120,11 @@ pub struct PendingSqlBatchExecuteReq {
     pub executor: Option<String>,
     #[serde(default)]
     pub remark: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PendingSqlBatchDeleteReq {
+    pub ids: Vec<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

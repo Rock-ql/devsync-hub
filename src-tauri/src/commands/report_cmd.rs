@@ -20,6 +20,20 @@ pub async fn get_report_detail(state: State<'_, AppState>, id: i32) -> AppResult
 
 #[tauri::command]
 pub async fn generate_report(state: State<'_, AppState>, req: ReportGenerateReq) -> AppResult<Report> {
+    // 非强制生成：如果报告已存在则直接返回，避免重复生成
+    if !req.force {
+        let db = state.db.lock().await;
+        if let Some(existing) = report_service::find_existing_report(&db.conn, &req)? {
+            log::info!(
+                "[报告生成] 报告已存在，直接返回: type={}, {}~{}",
+                req.r#type,
+                req.start_date,
+                req.end_date
+            );
+            return Ok(existing);
+        }
+    }
+
     // Phase 1: Read all DB data (sync)
     let ctx = {
         let db = state.db.lock().await;
@@ -58,12 +72,13 @@ pub async fn generate_report(state: State<'_, AppState>, req: ReportGenerateReq)
         )
     };
 
-    // Phase 3: Insert report into DB (sync)
+    // Phase 3: Upsert report into DB (sync)
     let db = state.db.lock().await;
-    report_service::generate_report_insert(&db.conn, &req, &ctx, &content)
+    report_service::generate_report_upsert(&db.conn, &req, &ctx, &content)
 }
 
 #[tauri::command]
+
 pub async fn update_report(state: State<'_, AppState>, req: ReportUpdateReq) -> AppResult<()> {
     let db = state.db.lock().await;
     report_service::update_report(&db.conn, &req)

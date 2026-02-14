@@ -1,8 +1,13 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, params_from_iter, Connection};
 use base64::Engine;
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
 use crate::error::{AppError, AppResult};
 use crate::models::project::*;
 use crate::models::common::PageResult;
+use crate::models::requirement::Requirement;
+use crate::services::iteration_service;
+
+const NEAREST_ANCHOR_MAX_MINUTES: i64 = 30;
 
 pub fn list_projects(conn: &Connection, req: &ProjectListReq) -> AppResult<PageResult<Project>> {
     let page = req.page.unwrap_or(1);
@@ -190,17 +195,150 @@ pub fn delete_project(conn: &Connection, id: i32) -> AppResult<()> {
         "UPDATE project SET deleted_at = datetime('now','localtime'), state = 0 WHERE id = ?",
         params![id],
     )?;
+
+    conn.execute(
+        "UPDATE sql_env_config SET deleted_at = datetime('now','localtime'), state = 0 WHERE project_id = ? AND state = 1",
+        params![id],
+    )?;
+
+    let sql_ids = collect_project_ids(
+        conn,
+        "SELECT id FROM pending_sql WHERE project_id = ? AND state = 1 AND deleted_at IS NULL",
+        id,
+    )?;
+    soft_delete_sqls(conn, &sql_ids)?;
+
+    let commit_ids = collect_project_ids(
+        conn,
+        "SELECT id FROM git_commit WHERE project_id = ? AND state = 1 AND deleted_at IS NULL",
+        id,
+    )?;
+    soft_delete_commits(conn, &commit_ids)?;
+
+    let iteration_ids = collect_project_ids(
+        conn,
+        "SELECT iteration_id FROM iteration_project WHERE project_id = ? AND state = 1 AND deleted_at IS NULL",
+        id,
+    )?;
+    conn.execute(
+        "UPDATE iteration_project SET deleted_at = datetime('now','localtime'), state = 0 WHERE project_id = ? AND state = 1",
+        params![id],
+    )?;
+
+    conn.execute(
+        "UPDATE requirement_project SET deleted_at = datetime('now','localtime'), state = 0 WHERE project_id = ? AND state = 1",
+        params![id],
+    )?;
+
+    for iteration_id in iteration_ids {
+        let relation_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM iteration_project WHERE iteration_id = ? AND state = 1 AND deleted_at IS NULL",
+                params![iteration_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if relation_count == 0 {
+            iteration_service::delete_iteration(conn, iteration_id)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_project_ids(conn: &Connection, sql: &str, project_id: i32) -> AppResult<Vec<i32>> {
+    let mut stmt = conn.prepare(sql)?;
+    let ids = stmt
+        .query_map(params![project_id], |row| row.get::<_, i32>(0))?
+        .filter_map(|row| row.ok())
+        .collect();
+    Ok(ids)
+}
+
+fn soft_delete_sqls(conn: &Connection, sql_ids: &[i32]) -> AppResult<()> {
+    if sql_ids.is_empty() {
+        return Ok(());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(sql_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let sql_update = format!(
+        "UPDATE pending_sql SET deleted_at = datetime('now','localtime'), state = 0 WHERE id IN ({}) AND state = 1 AND deleted_at IS NULL",
+        placeholders
+    );
+    conn.execute(&sql_update, params_from_iter(sql_ids.iter()))?;
+
+    let log_update = format!(
+        "UPDATE sql_execution_log SET deleted_at = datetime('now','localtime'), state = 0 WHERE sql_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&log_update, params_from_iter(sql_ids.iter()))?;
+
+    let link_update = format!(
+        "UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE link_type = 'sql' AND link_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&link_update, params_from_iter(sql_ids.iter()))?;
+
+    Ok(())
+}
+
+fn soft_delete_commits(conn: &Connection, commit_ids: &[i32]) -> AppResult<()> {
+    if commit_ids.is_empty() {
+        return Ok(());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(commit_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let commit_update = format!(
+        "UPDATE git_commit SET deleted_at = datetime('now','localtime'), state = 0 WHERE id IN ({}) AND state = 1 AND deleted_at IS NULL",
+        placeholders
+    );
+    conn.execute(&commit_update, params_from_iter(commit_ids.iter()))?;
+
+    let link_update = format!(
+        "UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE link_type = 'commit' AND link_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&link_update, params_from_iter(commit_ids.iter()))?;
+
     Ok(())
 }
 
 /// Prepare sync data needed for sync_commits (before async calls)
-pub fn sync_commits_prepare(conn: &Connection, id: i32) -> AppResult<(String, String, i32, String)> {
+pub fn sync_commits_prepare(conn: &Connection, id: i32) -> AppResult<(String, String, i32, String, String)> {
     let project = get_project_detail(conn, id)?.project;
     if project.gitlab_url.trim().is_empty() {
         return Err(AppError::BadRequest("GitLab repository URL not configured".into()));
     }
     let token = resolve_token(conn, &project.gitlab_token)?;
-    Ok((project.gitlab_url, token, project.gitlab_project_id, project.gitlab_branch))
+    Ok((project.gitlab_url, token, project.gitlab_project_id, project.gitlab_branch, project.name))
+}
+
+fn normalize_datetime(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if !trimmed.contains('T') {
+        return trimmed.to_string();
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
+        let local = dt.with_timezone(&FixedOffset::east_opt(8 * 3600).unwrap());
+        return local.format("%Y-%m-%d %H:%M:%S").to_string();
+    }
+    for fmt in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S"] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(trimmed, fmt) {
+            return naive.format("%Y-%m-%d %H:%M:%S").to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 /// Insert fetched commits into DB (after async calls)
@@ -208,11 +346,12 @@ pub fn sync_commits_insert(conn: &Connection, project_id: i32, branch_commits: &
     let mut total_new = 0;
     for (branch_name, commits) in branch_commits {
         for commit in commits {
+            let committed_at = normalize_datetime(&commit.committed_date);
             let changed = conn.execute(
                 "INSERT OR IGNORE INTO git_commit (project_id, commit_id, message, author_name, author_email, committed_at, additions, deletions, branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     project_id, commit.id, commit.message, commit.author_name, commit.author_email,
-                    commit.committed_date, commit.stats.additions, commit.stats.deletions, branch_name
+                    committed_at, commit.stats.additions, commit.stats.deletions, branch_name
                 ],
             )?;
             total_new += changed as i32;
@@ -220,6 +359,274 @@ pub fn sync_commits_insert(conn: &Connection, project_id: i32, branch_commits: &
     }
     Ok(total_new)
 }
+
+pub fn link_synced_commits_to_requirements(conn: &Connection, project_id: i32, commit_shas: &[String]) -> AppResult<i32> {
+    if commit_shas.is_empty() {
+        return Ok(0);
+    }
+
+    let requirements = load_project_requirements(conn, project_id)?;
+    let mut coded: Vec<(i32, String)> = Vec::new();
+    for requirement in &requirements {
+        let code = get_requirement_code(requirement);
+        if !code.is_empty() {
+            coded.push((requirement.id, code));
+        }
+    }
+
+    if coded.is_empty() {
+        return Ok(0);
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(commit_shas.len())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let sql = format!(
+        "SELECT id, commit_id, message, committed_at FROM git_commit WHERE project_id = ? AND state = 1 AND deleted_at IS NULL AND commit_id IN ({}) ORDER BY committed_at ASC, id ASC",
+        placeholders
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(project_id)];
+    for sha in commit_shas {
+        params_vec.push(Box::new(sha.clone()));
+    }
+    let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec
+        .iter()
+        .map(|value| value.as_ref() as &dyn rusqlite::types::ToSql)
+        .collect();
+
+    #[derive(Debug, Clone)]
+    struct CommitCandidate {
+        id: i32,
+        commit_sha: String,
+        message: String,
+        committed_at: String,
+    }
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), |row| {
+        Ok(CommitCandidate {
+            id: row.get(0)?,
+            commit_sha: row.get(1)?,
+            message: row.get(2)?,
+            committed_at: row.get(3)?,
+        })
+    })?;
+
+    let commits: Vec<CommitCandidate> = rows.filter_map(|row| row.ok()).collect();
+    if commits.is_empty() {
+        return Ok(0);
+    }
+
+    let commit_ids: Vec<i32> = commits.iter().map(|item| item.id).collect();
+    soft_delete_commit_links(conn, &commit_ids)?;
+
+    #[derive(Debug, Clone)]
+    struct CommitAnchor {
+        requirement_id: i32,
+        committed_at: DateTime<FixedOffset>,
+    }
+
+    let mut matched: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
+    let mut anchors: Vec<CommitAnchor> = Vec::new();
+
+    for commit in &commits {
+        if is_merge_commit(&commit.message) {
+            continue;
+        }
+
+        let message_code = extract_requirement_code_from_text(&commit.message);
+        if message_code.is_empty() {
+            continue;
+        }
+
+        let mut found_requirement: Option<i32> = None;
+        for (req_id, req_code) in &coded {
+            if *req_code == message_code {
+                found_requirement = Some(*req_id);
+                break;
+            }
+        }
+
+        let Some(requirement_id) = found_requirement else {
+            continue;
+        };
+
+        matched.insert(commit.id, requirement_id);
+
+        if let Some(committed_at) = parse_commit_time(&commit.committed_at) {
+            anchors.push(CommitAnchor {
+                requirement_id,
+                committed_at,
+            });
+        }
+    }
+
+    if !anchors.is_empty() {
+        for commit in &commits {
+            if matched.contains_key(&commit.id) || is_merge_commit(&commit.message) {
+                continue;
+            }
+
+            let Some(commit_time) = parse_commit_time(&commit.committed_at) else {
+                continue;
+            };
+
+            let mut nearest_requirement_id: Option<i32> = None;
+            let mut nearest_minutes = i64::MAX;
+
+            for anchor in &anchors {
+                let minutes = (commit_time - anchor.committed_at).num_minutes().abs();
+                if minutes <= NEAREST_ANCHOR_MAX_MINUTES && minutes < nearest_minutes {
+                    nearest_minutes = minutes;
+                    nearest_requirement_id = Some(anchor.requirement_id);
+                }
+            }
+
+            if let Some(requirement_id) = nearest_requirement_id {
+                matched.insert(commit.id, requirement_id);
+            }
+        }
+    }
+
+    let mut inserted = 0;
+    for (commit_id, requirement_id) in matched {
+        conn.execute(
+            "INSERT INTO work_item_link (work_item_id, link_type, link_id) VALUES (?, 'commit', ?)",
+            params![requirement_id, commit_id],
+        )?;
+        inserted += 1;
+    }
+
+    Ok(inserted)
+}
+
+fn load_project_requirements(conn: &Connection, project_id: i32) -> AppResult<Vec<Requirement>> {
+    let mut stmt = conn.prepare(
+        "SELECT r.id, r.iteration_id, r.name, r.requirement_code, r.environment, r.link, r.status, r.branch, r.state, r.created_at, r.updated_at          FROM requirement r          INNER JOIN requirement_project rp ON r.id = rp.requirement_id          WHERE rp.project_id = ? AND rp.state = 1 AND rp.deleted_at IS NULL            AND r.state = 1 AND r.deleted_at IS NULL          ORDER BY r.updated_at DESC, r.id DESC",
+    )?;
+
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(Requirement {
+            id: row.get(0)?,
+            iteration_id: row.get(1)?,
+            name: row.get(2)?,
+            requirement_code: row.get(3)?,
+            environment: row.get(4)?,
+            link: row.get(5)?,
+            status: row.get(6)?,
+            branch: row.get(7)?,
+            state: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?;
+
+    Ok(rows.filter_map(|row| row.ok()).collect())
+}
+
+fn soft_delete_commit_links(conn: &Connection, commit_ids: &[i32]) -> AppResult<()> {
+    if commit_ids.is_empty() {
+        return Ok(());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(commit_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let sql = format!(
+        "UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE link_type = 'commit' AND link_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&sql, params_from_iter(commit_ids.iter()))?;
+    Ok(())
+}
+
+fn is_merge_commit(message: &str) -> bool {
+    let normalized = message.trim().to_lowercase();
+    normalized.starts_with("merge branch")
+        || normalized.starts_with("merge remote-tracking branch")
+        || normalized.starts_with("merge pull request")
+        || normalized.starts_with("merge !")
+}
+
+fn get_requirement_code(requirement: &Requirement) -> String {
+    let configured = requirement.requirement_code.trim().to_uppercase();
+    if !configured.is_empty() {
+        return configured;
+    }
+    extract_requirement_code_from_text(&requirement.name)
+}
+
+fn extract_requirement_code_from_text(text: &str) -> String {
+    let chars: Vec<char> = text.trim().to_uppercase().chars().collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+
+    let mut index = 0;
+    while index < chars.len() {
+        if !chars[index].is_ascii_alphabetic() {
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        while index < chars.len() && chars[index].is_ascii_alphabetic() {
+            index += 1;
+        }
+
+        if index >= chars.len() || chars[index] != '-' {
+            continue;
+        }
+
+        let hyphen_idx = index;
+        index += 1;
+        let digits_start = index;
+        while index < chars.len() && chars[index].is_ascii_digit() {
+            index += 1;
+        }
+
+        if index > digits_start {
+            return chars[start..index].iter().collect();
+        }
+
+        index = hyphen_idx + 1;
+    }
+
+    String::new()
+}
+
+fn parse_commit_time(time_text: &str) -> Option<DateTime<FixedOffset>> {
+    let value = time_text.trim();
+    if value.is_empty() {
+        return None;
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(value) {
+        return Some(parsed);
+    }
+
+    let offset = FixedOffset::east_opt(8 * 3600)?;
+
+    for format in [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+    ] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(value, format) {
+            if let Some(parsed) = offset.from_local_datetime(&naive).single() {
+                return Some(parsed);
+            }
+        }
+    }
+
+    None
+}
+
 
 pub fn get_commits(conn: &Connection, project_id: i32) -> AppResult<Vec<crate::models::git_commit::GitCommit>> {
     let mut stmt = conn.prepare(

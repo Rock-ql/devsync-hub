@@ -41,6 +41,8 @@ pub struct ReportGenerateReq {
     pub start_date: String,
     pub end_date: String,
     #[serde(default)]
+    pub force: bool,
+    #[serde(default)]
     pub author_email: Option<String>,
     #[serde(default)]
     pub project_ids: Option<Vec<i32>>,

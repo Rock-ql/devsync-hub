@@ -80,6 +80,14 @@ pub fn get_sql_detail(conn: &Connection, id: i32) -> AppResult<PendingSqlDetailR
 }
 
 pub fn add_sql(conn: &Connection, req: &PendingSqlAddReq) -> AppResult<i32> {
+    let title = req.title.trim();
+    if title.is_empty() {
+        return Err(AppError::BadRequest("sql title cannot be empty".into()));
+    }
+    if req.content.trim().is_empty() {
+        return Err(AppError::BadRequest("sql content cannot be empty".into()));
+    }
+
     let max_order: i32 = conn.query_row(
         "SELECT COALESCE(MAX(execution_order), 0) FROM pending_sql WHERE iteration_id = ? AND state = 1",
         params![req.iteration_id], |row| row.get(0),
@@ -88,7 +96,14 @@ pub fn add_sql(conn: &Connection, req: &PendingSqlAddReq) -> AppResult<i32> {
     let order = req.execution_order.unwrap_or(max_order + 1);
     conn.execute(
         "INSERT INTO pending_sql (project_id, iteration_id, title, content, execution_order, remark) VALUES (?, ?, ?, ?, ?, ?)",
-        params![req.project_id, req.iteration_id, req.title, req.content, order, req.remark.as_deref().unwrap_or("")],
+        params![
+            req.project_id,
+            req.iteration_id,
+            title,
+            req.content,
+            order,
+            req.remark.as_deref().unwrap_or("").trim(),
+        ],
     )?;
     Ok(conn.last_insert_rowid() as i32)
 }
@@ -97,10 +112,29 @@ pub fn update_sql(conn: &Connection, req: &PendingSqlUpdateReq) -> AppResult<()>
     let mut sets = vec![];
     let mut pv: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
 
-    if let Some(v) = &req.title { sets.push("title = ?"); pv.push(Box::new(v.clone())); }
-    if let Some(v) = &req.content { sets.push("content = ?"); pv.push(Box::new(v.clone())); }
-    if let Some(v) = &req.execution_order { sets.push("execution_order = ?"); pv.push(Box::new(*v)); }
-    if let Some(v) = &req.remark { sets.push("remark = ?"); pv.push(Box::new(v.clone())); }
+    if let Some(v) = &req.title {
+        let title = v.trim();
+        if title.is_empty() {
+            return Err(AppError::BadRequest("sql title cannot be empty".into()));
+        }
+        sets.push("title = ?");
+        pv.push(Box::new(title.to_string()));
+    }
+    if let Some(v) = &req.content {
+        if v.trim().is_empty() {
+            return Err(AppError::BadRequest("sql content cannot be empty".into()));
+        }
+        sets.push("content = ?");
+        pv.push(Box::new(v.clone()));
+    }
+    if let Some(v) = &req.execution_order {
+        sets.push("execution_order = ?");
+        pv.push(Box::new(*v));
+    }
+    if let Some(v) = &req.remark {
+        sets.push("remark = ?");
+        pv.push(Box::new(v.trim().to_string()));
+    }
 
     if !sets.is_empty() {
         sets.push("updated_at = datetime('now','localtime')");
@@ -113,7 +147,19 @@ pub fn update_sql(conn: &Connection, req: &PendingSqlUpdateReq) -> AppResult<()>
 }
 
 pub fn delete_sql(conn: &Connection, id: i32) -> AppResult<()> {
-    conn.execute("UPDATE pending_sql SET deleted_at = datetime('now','localtime'), state = 0 WHERE id = ?", params![id])?;
+    conn.execute(
+        "UPDATE pending_sql SET deleted_at = datetime('now','localtime'), state = 0 WHERE id = ?",
+        params![id],
+    )?;
+    // 级联处理：执行日志、需求关联关系都做软删除，避免脏数据影响统计
+    conn.execute(
+        "UPDATE sql_execution_log SET deleted_at = datetime('now','localtime'), state = 0 WHERE sql_id = ? AND state = 1",
+        params![id],
+    )?;
+    conn.execute(
+        "UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE link_type = 'sql' AND link_id = ? AND state = 1",
+        params![id],
+    )?;
     Ok(())
 }
 
@@ -151,6 +197,146 @@ pub fn revoke_execution(conn: &Connection, req: &SqlExecutionRevokeReq) -> AppRe
         "DELETE FROM sql_execution_log WHERE sql_id = ? AND env = ?",
         params![req.sql_id, req.env],
     )?;
+    Ok(())
+}
+
+pub fn list_sql_env_configs(conn: &Connection, project_id: i32) -> AppResult<Vec<SqlEnvConfig>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, env_code, env_name, sort_order FROM sql_env_config WHERE project_id = ? AND state = 1 AND deleted_at IS NULL ORDER BY sort_order ASC, id ASC"
+    )?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(SqlEnvConfig {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            env_code: row.get(2)?,
+            env_name: row.get(3)?,
+            sort_order: row.get(4)?,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn add_sql_env_config(conn: &Connection, req: &SqlEnvConfigAddReq) -> AppResult<i32> {
+    let env_code = req.env_code.trim();
+    if env_code.is_empty() {
+        return Err(AppError::BadRequest("env_code is required".into()));
+    }
+    let env_name = req.env_name.trim();
+    if env_name.is_empty() {
+        return Err(AppError::BadRequest("env_name is required".into()));
+    }
+
+    let dup: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sql_env_config WHERE project_id = ? AND env_code = ? AND state = 1 AND deleted_at IS NULL",
+        params![req.project_id, env_code],
+        |row| row.get(0),
+    )?;
+    if dup > 0 {
+        return Err(AppError::BadRequest(format!("env_code already exists: {}", env_code)));
+    }
+
+    let max_order: i32 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), 0) FROM sql_env_config WHERE project_id = ? AND state = 1 AND deleted_at IS NULL",
+        params![req.project_id],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    let sort_order = req.sort_order.unwrap_or(max_order + 1);
+
+    conn.execute(
+        "INSERT INTO sql_env_config (project_id, env_code, env_name, sort_order) VALUES (?, ?, ?, ?)",
+        params![req.project_id, env_code, env_name, sort_order],
+    )?;
+    Ok(conn.last_insert_rowid() as i32)
+}
+
+pub fn update_sql_env_config(conn: &Connection, req: &SqlEnvConfigUpdateReq) -> AppResult<()> {
+    let mut sets = vec![];
+    let mut pv: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+
+    if let Some(v) = &req.env_code {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::BadRequest("env_code cannot be empty".into()));
+        }
+        // 检查 env_code 是否重复（同项目内）
+        let project_id: i32 = conn.query_row(
+            "SELECT project_id FROM sql_env_config WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+            params![req.id],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        if project_id > 0 {
+            let dup: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sql_env_config WHERE project_id = ? AND env_code = ? AND id != ? AND state = 1 AND deleted_at IS NULL",
+                params![project_id, trimmed, req.id],
+                |row| row.get(0),
+            )?;
+            if dup > 0 {
+                return Err(AppError::BadRequest(format!("env_code already exists: {}", trimmed)));
+            }
+        }
+        sets.push("env_code = ?");
+        pv.push(Box::new(trimmed.to_string()));
+    }
+
+    if let Some(v) = &req.env_name {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::BadRequest("env_name cannot be empty".into()));
+        }
+        sets.push("env_name = ?");
+        pv.push(Box::new(trimmed.to_string()));
+    }
+
+    if let Some(v) = req.sort_order {
+        sets.push("sort_order = ?");
+        pv.push(Box::new(v));
+    }
+
+    if sets.is_empty() {
+        return Ok(());
+    }
+
+    sets.push("updated_at = datetime('now','localtime')");
+    pv.push(Box::new(req.id));
+    let sql = format!("UPDATE sql_env_config SET {} WHERE id = ? AND state = 1 AND deleted_at IS NULL", sets.join(", "));
+    let refs: Vec<&dyn rusqlite::types::ToSql> = pv.iter().map(|p| p.as_ref() as &dyn rusqlite::types::ToSql).collect();
+    conn.execute(&sql, refs.as_slice())?;
+    Ok(())
+}
+
+pub fn delete_sql_env_config(conn: &Connection, id: i32) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sql_env_config SET deleted_at = datetime('now','localtime'), state = 0 WHERE id = ?",
+        params![id],
+    )?;
+    Ok(())
+}
+
+pub fn batch_delete_sql(conn: &Connection, req: &PendingSqlBatchDeleteReq) -> AppResult<()> {
+    if req.ids.is_empty() {
+        return Ok(());
+    }
+
+    let placeholders = std::iter::repeat("?").take(req.ids.len()).collect::<Vec<_>>().join(",");
+
+    let sql = format!(
+        "UPDATE pending_sql SET deleted_at = datetime('now','localtime'), state = 0 WHERE id IN ({}) AND state = 1 AND deleted_at IS NULL",
+        placeholders
+    );
+    conn.execute(&sql, rusqlite::params_from_iter(req.ids.iter()))?;
+
+    let log_sql = format!(
+        "UPDATE sql_execution_log SET deleted_at = datetime('now','localtime'), state = 0 WHERE sql_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&log_sql, rusqlite::params_from_iter(req.ids.iter()))?;
+
+    let link_sql = format!(
+        "UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE link_type = 'sql' AND link_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&link_sql, rusqlite::params_from_iter(req.ids.iter()))?;
+
     Ok(())
 }
 

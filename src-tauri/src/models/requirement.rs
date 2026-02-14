@@ -30,6 +30,19 @@ pub struct RequirementListReq {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct RequirementPageReq {
+    pub iteration_id: i32,
+    #[serde(default)]
+    pub page: Option<i64>,
+    #[serde(default)]
+    pub size: Option<i64>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub keyword: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RequirementAddReq {
     pub iteration_id: i32,
     pub name: String,
@@ -93,3 +106,32 @@ pub struct RequirementDetailRsp {
     pub sql_count: i64,
     pub commit_count: i64,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RequirementCommitListReq {
+    pub requirement_id: i32,
+    #[serde(default)]
+    pub page: Option<i64>,
+    #[serde(default)]
+    pub size: Option<i64>,
+    #[serde(default)]
+    pub start_date: Option<String>,
+    #[serde(default)]
+    pub end_date: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RequirementCommitRsp {
+    pub id: i32,
+    pub project_id: i32,
+    pub project_name: String,
+    pub commit_id: String,
+    pub message: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub committed_at: String,
+    pub additions: i32,
+    pub deletions: i32,
+    pub branch: String,
+}
+

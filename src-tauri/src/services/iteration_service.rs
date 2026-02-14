@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, params_from_iter, Connection};
 use crate::error::{AppError, AppResult};
 use crate::models::iteration::*;
 use crate::models::common::PageResult;
@@ -99,14 +99,18 @@ pub fn get_iteration_detail(conn: &Connection, id: i32) -> AppResult<IterationDe
 }
 
 pub fn add_iteration(conn: &Connection, req: &IterationAddReq) -> AppResult<i32> {
+    let start_date = req.start_date.as_deref().unwrap_or("").trim().to_string();
+    let end_date = req.end_date.as_deref().unwrap_or("").trim().to_string();
+    validate_date_range(&start_date, &end_date)?;
+
     conn.execute(
         "INSERT INTO iteration (name, description, status, start_date, end_date) VALUES (?, ?, ?, ?, ?)",
         params![
-            req.name,
-            req.description.as_deref().unwrap_or(""),
-            req.status.as_deref().unwrap_or("planning"),
-            req.start_date.as_deref().unwrap_or(""),
-            req.end_date.as_deref().unwrap_or(""),
+            req.name.trim(),
+            req.description.as_deref().unwrap_or("").trim(),
+            req.status.as_deref().unwrap_or("planning").trim(),
+            start_date,
+            end_date,
         ],
     )?;
     let id = conn.last_insert_rowid() as i32;
@@ -123,14 +127,51 @@ pub fn add_iteration(conn: &Connection, req: &IterationAddReq) -> AppResult<i32>
 }
 
 pub fn update_iteration(conn: &Connection, req: &IterationUpdateReq) -> AppResult<()> {
+    if req.start_date.is_some() || req.end_date.is_some() {
+        let (current_start, current_end): (String, String) = conn
+            .query_row(
+                "SELECT start_date, end_date FROM iteration WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+                params![req.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| AppError::NotFound("Iteration not found".into()))?;
+
+        let next_start = req
+            .start_date
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .unwrap_or(current_start);
+        let next_end = req
+            .end_date
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .unwrap_or(current_end);
+        validate_date_range(&next_start, &next_end)?;
+    }
+
     let mut sets = vec![];
     let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
 
-    if let Some(v) = &req.name { sets.push("name = ?"); params_vec.push(Box::new(v.clone())); }
-    if let Some(v) = &req.description { sets.push("description = ?"); params_vec.push(Box::new(v.clone())); }
-    if let Some(v) = &req.status { sets.push("status = ?"); params_vec.push(Box::new(v.clone())); }
-    if let Some(v) = &req.start_date { sets.push("start_date = ?"); params_vec.push(Box::new(v.clone())); }
-    if let Some(v) = &req.end_date { sets.push("end_date = ?"); params_vec.push(Box::new(v.clone())); }
+    if let Some(v) = &req.name {
+        sets.push("name = ?");
+        params_vec.push(Box::new(v.trim().to_string()));
+    }
+    if let Some(v) = &req.description {
+        sets.push("description = ?");
+        params_vec.push(Box::new(v.trim().to_string()));
+    }
+    if let Some(v) = &req.status {
+        sets.push("status = ?");
+        params_vec.push(Box::new(v.trim().to_string()));
+    }
+    if let Some(v) = &req.start_date {
+        sets.push("start_date = ?");
+        params_vec.push(Box::new(v.trim().to_string()));
+    }
+    if let Some(v) = &req.end_date {
+        sets.push("end_date = ?");
+        params_vec.push(Box::new(v.trim().to_string()));
+    }
 
     if !sets.is_empty() {
         sets.push("updated_at = datetime('now','localtime')");
@@ -155,6 +196,21 @@ pub fn update_iteration(conn: &Connection, req: &IterationUpdateReq) -> AppResul
 pub fn delete_iteration(conn: &Connection, id: i32) -> AppResult<()> {
     conn.execute("UPDATE iteration SET deleted_at = datetime('now','localtime'), state = 0 WHERE id = ?", params![id])?;
     conn.execute("UPDATE iteration_project SET deleted_at = datetime('now','localtime'), state = 0 WHERE iteration_id = ?", params![id])?;
+
+    let requirement_ids = collect_ids(
+        conn,
+        "SELECT id FROM requirement WHERE iteration_id = ? AND state = 1 AND deleted_at IS NULL",
+        id,
+    )?;
+    soft_delete_requirements(conn, &requirement_ids)?;
+
+    let sql_ids = collect_ids(
+        conn,
+        "SELECT id FROM pending_sql WHERE iteration_id = ? AND state = 1 AND deleted_at IS NULL",
+        id,
+    )?;
+    soft_delete_sqls(conn, &sql_ids)?;
+
     Ok(())
 }
 
@@ -164,6 +220,92 @@ pub fn update_status(conn: &Connection, id: i32, status: &str) -> AppResult<()> 
         return Err(AppError::BadRequest(format!("Invalid status: {}", status)));
     }
     conn.execute("UPDATE iteration SET status = ?, updated_at = datetime('now','localtime') WHERE id = ? AND state = 1", params![status, id])?;
+    Ok(())
+}
+
+fn validate_date_range(start_date: &str, end_date: &str) -> AppResult<()> {
+    let start = start_date.trim();
+    let end = end_date.trim();
+    if !start.is_empty() && !end.is_empty() && end < start {
+        return Err(AppError::BadRequest("end_date cannot be earlier than start_date".into()));
+    }
+    Ok(())
+}
+
+fn collect_ids(conn: &Connection, sql: &str, scope_id: i32) -> AppResult<Vec<i32>> {
+    let mut stmt = conn.prepare(sql)?;
+    let ids = stmt
+        .query_map(params![scope_id], |row| row.get::<_, i32>(0))?
+        .filter_map(|row| row.ok())
+        .collect();
+    Ok(ids)
+}
+
+fn soft_delete_requirements(conn: &Connection, requirement_ids: &[i32]) -> AppResult<()> {
+    if requirement_ids.is_empty() {
+        return Ok(());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(requirement_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let requirement_sql = format!(
+        "UPDATE requirement SET deleted_at = datetime('now','localtime'), state = 0 WHERE id IN ({}) AND state = 1 AND deleted_at IS NULL",
+        placeholders
+    );
+    conn.execute(&requirement_sql, params_from_iter(requirement_ids.iter()))?;
+
+    let project_sql = format!(
+        "UPDATE requirement_project SET deleted_at = datetime('now','localtime'), state = 0 WHERE requirement_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&project_sql, params_from_iter(requirement_ids.iter()))?;
+
+    let work_item_sql = format!(
+        "UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE work_item_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&work_item_sql, params_from_iter(requirement_ids.iter()))?;
+
+    let requirement_link_sql = format!(
+        "UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE link_type = 'requirement' AND link_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&requirement_link_sql, params_from_iter(requirement_ids.iter()))?;
+
+    Ok(())
+}
+
+fn soft_delete_sqls(conn: &Connection, sql_ids: &[i32]) -> AppResult<()> {
+    if sql_ids.is_empty() {
+        return Ok(());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(sql_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let sql_update = format!(
+        "UPDATE pending_sql SET deleted_at = datetime('now','localtime'), state = 0 WHERE id IN ({}) AND state = 1 AND deleted_at IS NULL",
+        placeholders
+    );
+    conn.execute(&sql_update, params_from_iter(sql_ids.iter()))?;
+
+    let execution_log_update = format!(
+        "UPDATE sql_execution_log SET deleted_at = datetime('now','localtime'), state = 0 WHERE sql_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&execution_log_update, params_from_iter(sql_ids.iter()))?;
+
+    let work_link_update = format!(
+        "UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE link_type = 'sql' AND link_id IN ({}) AND state = 1",
+        placeholders
+    );
+    conn.execute(&work_link_update, params_from_iter(sql_ids.iter()))?;
+
     Ok(())
 }
 
