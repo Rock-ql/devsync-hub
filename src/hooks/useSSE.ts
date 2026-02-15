@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef } from "react";
 
+const SSE_URL = "http://127.0.0.1:3721/events";
+const HEARTBEAT_TIMEOUT_MS = 35_000;
+
 interface SSEOptions {
   events?: string[];
   onMessage?: (event: string, data: string) => void;
@@ -9,20 +12,29 @@ interface SSEOptions {
 export function useSSE(options?: SSEOptions) {
   const sourceRef = useRef<EventSource | null>(null);
   const optionsRef = useRef<SSEOptions | undefined>(options);
+  const heartbeatTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     optionsRef.current = options;
   }, [options]);
+
+  const resetHeartbeatTimer = useCallback((reconnectFn: () => void) => {
+    clearTimeout(heartbeatTimerRef.current);
+    heartbeatTimerRef.current = setTimeout(() => {
+      sourceRef.current?.close();
+      reconnectFn();
+    }, HEARTBEAT_TIMEOUT_MS);
+  }, []);
 
   const connect = useCallback(() => {
     if (sourceRef.current) {
       sourceRef.current.close();
     }
 
-    const source = new EventSource("http://127.0.0.1:3721/events");
+    const source = new EventSource(SSE_URL);
 
     source.addEventListener("heartbeat", () => {
-      // heartbeat received
+      resetHeartbeatTimer(connect);
     });
 
     const customEvents = optionsRef.current?.events || [];
@@ -38,15 +50,16 @@ export function useSSE(options?: SSEOptions) {
 
     source.onerror = (event) => {
       optionsRef.current?.onError?.(event);
-      // 自动重连由 EventSource 处理
     };
 
     sourceRef.current = source;
-  }, []);
+    resetHeartbeatTimer(connect);
+  }, [resetHeartbeatTimer]);
 
   useEffect(() => {
     connect();
     return () => {
+      clearTimeout(heartbeatTimerRef.current);
       sourceRef.current?.close();
     };
   }, [connect]);

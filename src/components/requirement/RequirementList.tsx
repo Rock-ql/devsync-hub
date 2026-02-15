@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toaster'
 
 interface ProjectOption {
@@ -107,13 +108,17 @@ export default function RequirementList({ iterationId, iterationName, projects }
     setCommitsDialogOpen(true)
   }
 
+  const [deleteTarget, setDeleteTarget] = useState<RequirementItem | null>(null)
+
   const handleDelete = (item: RequirementItem) => {
-    const linkedTotal = (item.sql_count || 0) + (item.commit_count || 0)
-    const message = linkedTotal > 0
-      ? `该需求已关联 ${linkedTotal} 条记录，确定删除？`
-      : '确定删除该需求吗？'
-    if (!confirm(message)) return
-    deleteMutation.mutate(item.id)
+    setDeleteTarget(item)
+  }
+
+  const confirmDelete = () => {
+    if (deleteTarget) {
+      deleteMutation.mutate(deleteTarget.id)
+      setDeleteTarget(null)
+    }
   }
 
   const displayProjects = (names: string[]) => {
@@ -290,6 +295,23 @@ export default function RequirementList({ iterationId, iterationName, projects }
         }}
         requirement={commitsRequirement}
       />
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {deleteTarget && ((deleteTarget.sql_count || 0) + (deleteTarget.commit_count || 0)) > 0
+              ? `需求「${deleteTarget.name}」已关联 ${(deleteTarget.sql_count || 0) + (deleteTarget.commit_count || 0)} 条记录，确定删除？`
+              : `确定删除需求「${deleteTarget?.name}」吗？`}
+          </p>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>取消</Button>
+            <Button variant="primary" className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmDelete}>删除</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

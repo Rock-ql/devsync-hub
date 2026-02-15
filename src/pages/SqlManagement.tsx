@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { PageResult } from '@/api'
 import { sqlApi, PendingSqlDetail } from '@/api/sql'

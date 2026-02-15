@@ -32,21 +32,21 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
 import { toast } from '@/components/ui/toaster'
-import { useReportStore, type PanelState, type WeekRow } from '@/stores/useReportStore'
+import { useReportStore, type WeekRow } from '@/stores/useReportStore'
 
 const WEEK_DAYS = ['一', '二', '三', '四', '五', '六', '日']
 
 const MARKDOWN_COMPONENTS: Components = {
-  h1: ({ node, className, ...props }) => <h1 className={cn('mt-8 text-3xl font-display text-foreground', className)} {...props} />,
-  h2: ({ node, className, ...props }) => <h2 className={cn('mt-7 text-2xl font-display text-foreground', className)} {...props} />,
-  h3: ({ node, className, ...props }) => <h3 className={cn('mt-6 text-xl font-display text-foreground', className)} {...props} />,
-  p: ({ node, className, ...props }) => <p className={cn('my-3 leading-7 text-muted-foreground', className)} {...props} />,
-  ol: ({ node, className, ...props }) => <ol className={cn('my-3 list-decimal space-y-2 pl-6 text-muted-foreground', className)} {...props} />,
-  ul: ({ node, className, ...props }) => <ul className={cn('my-3 list-disc space-y-2 pl-6 text-muted-foreground', className)} {...props} />,
-  li: ({ node, className, ...props }) => <li className={cn('leading-7', className)} {...props} />,
-  blockquote: ({ node, className, ...props }) => <blockquote className={cn('my-4 border-l-2 border-[hsl(var(--accent))]/40 pl-4 text-muted-foreground', className)} {...props} />,
-  pre: ({ node, className, ...props }) => <pre className={cn('my-4 overflow-x-auto rounded-xl border border-border bg-muted/60 p-4 text-sm text-foreground', className)} {...props} />,
-  code: ({ node, className, ...props }) => <code className={cn('rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground', className)} {...props} />,
+  h1: ({ node: _node, className, ...props }) => <h1 className={cn('mt-8 text-3xl font-display text-foreground', className)} {...props} />,
+  h2: ({ node: _node, className, ...props }) => <h2 className={cn('mt-7 text-2xl font-display text-foreground', className)} {...props} />,
+  h3: ({ node: _node, className, ...props }) => <h3 className={cn('mt-6 text-xl font-display text-foreground', className)} {...props} />,
+  p: ({ node: _node, className, ...props }) => <p className={cn('my-3 leading-7 text-muted-foreground', className)} {...props} />,
+  ol: ({ node: _node, className, ...props }) => <ol className={cn('my-3 list-decimal space-y-2 pl-6 text-muted-foreground', className)} {...props} />,
+  ul: ({ node: _node, className, ...props }) => <ul className={cn('my-3 list-disc space-y-2 pl-6 text-muted-foreground', className)} {...props} />,
+  li: ({ node: _node, className, ...props }) => <li className={cn('leading-7', className)} {...props} />,
+  blockquote: ({ node: _node, className, ...props }) => <blockquote className={cn('my-4 border-l-2 border-[hsl(var(--accent))]/40 pl-4 text-muted-foreground', className)} {...props} />,
+  pre: ({ node: _node, className, ...props }) => <pre className={cn('my-4 overflow-x-auto rounded-xl border border-border bg-muted/60 p-4 text-sm text-foreground', className)} {...props} />,
+  code: ({ node: _node, className, ...props }) => <code className={cn('rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground', className)} {...props} />,
 }
 
 function normalizeReportMarkdown(content: string): string {

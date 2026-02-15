@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { settingApi, type ApiKeyItem, type ApiKeyCreateResult, type SystemSetting, type ImportResult } from '@/api/setting'
+import { settingApi, type ImportResult } from '@/api/setting'
 import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

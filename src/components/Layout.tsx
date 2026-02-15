@@ -61,22 +61,22 @@ export default function Layout() {
         return
       }
 
-      let payload: any
+      let payload: Record<string, unknown>
       try {
-        payload = JSON.parse(data)
+        payload = JSON.parse(data) as Record<string, unknown>
       } catch {
         return
       }
 
-      const projectId = Number(payload?.project_id)
+      const projectId = Number(payload.project_id)
       if (!Number.isFinite(projectId) || projectId <= 0) {
         return
       }
 
-      const projectName = String(payload?.project_name || `#${projectId}`)
-      const status = String(payload?.status || 'running')
-      const message = String(payload?.message || '')
-      const percent = typeof payload?.percent === 'number' ? payload.percent : null
+      const projectName = String(payload.project_name || `#${projectId}`)
+      const status = String(payload.status || 'running')
+      const message = String(payload.message || '')
+      const percent = typeof payload.percent === 'number' ? payload.percent : null
 
       const description = percent !== null ? `${message} (${percent}%)` : message
       const variant = status === 'error' ? 'error' : status === 'done' ? 'success' : 'default'

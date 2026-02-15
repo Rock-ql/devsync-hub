@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { Toaster } from './components/ui/toaster'
 import { Spinner } from './components/ui/spinner'
 
@@ -22,16 +23,18 @@ function PageFallback() {
 function App() {
   return (
     <>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Suspense fallback={<PageFallback />}><Dashboard /></Suspense>} />
-          <Route path="projects" element={<Suspense fallback={<PageFallback />}><Projects /></Suspense>} />
-          <Route path="iterations" element={<Suspense fallback={<PageFallback />}><Iterations /></Suspense>} />
-          <Route path="sql" element={<Suspense fallback={<PageFallback />}><SqlManagement /></Suspense>} />
-          <Route path="reports" element={<Suspense fallback={<PageFallback />}><Reports /></Suspense>} />
-          <Route path="settings" element={<Suspense fallback={<PageFallback />}><Settings /></Suspense>} />
-        </Route>
-      </Routes>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Suspense fallback={<PageFallback />}><ErrorBoundary><Dashboard /></ErrorBoundary></Suspense>} />
+            <Route path="projects" element={<Suspense fallback={<PageFallback />}><ErrorBoundary><Projects /></ErrorBoundary></Suspense>} />
+            <Route path="iterations" element={<Suspense fallback={<PageFallback />}><ErrorBoundary><Iterations /></ErrorBoundary></Suspense>} />
+            <Route path="sql" element={<Suspense fallback={<PageFallback />}><ErrorBoundary><SqlManagement /></ErrorBoundary></Suspense>} />
+            <Route path="reports" element={<Suspense fallback={<PageFallback />}><ErrorBoundary><Reports /></ErrorBoundary></Suspense>} />
+            <Route path="settings" element={<Suspense fallback={<PageFallback />}><ErrorBoundary><Settings /></ErrorBoundary></Suspense>} />
+          </Route>
+        </Routes>
+      </ErrorBoundary>
       <Toaster />
     </>
   )
