@@ -37,8 +37,8 @@ pub async fn update_iteration(state: State<'_, AppState>, req: IterationUpdateRe
 
 #[tauri::command]
 pub async fn delete_iteration(state: State<'_, AppState>, id: i32) -> AppResult<()> {
-    let db = state.db.lock().await;
-    iteration_service::delete_iteration(&db.conn, id)
+    let mut db = state.db.lock().await;
+    iteration_service::delete_iteration(&mut db.conn, id)
 }
 
 #[tauri::command]

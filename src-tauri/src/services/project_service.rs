@@ -239,7 +239,7 @@ pub fn delete_project(conn: &Connection, id: i32) -> AppResult<()> {
             )
             .unwrap_or(0);
         if relation_count == 0 {
-            iteration_service::delete_iteration(conn, iteration_id)?;
+            iteration_service::delete_iteration_inner(conn, iteration_id)?;
         }
     }
 
@@ -330,7 +330,8 @@ fn normalize_datetime(input: &str) -> String {
         return trimmed.to_string();
     }
     if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
-        let local = dt.with_timezone(&FixedOffset::east_opt(8 * 3600).unwrap());
+        let offset = FixedOffset::east_opt(8 * 3600).expect("UTC+8 offset is always valid");
+        let local = dt.with_timezone(&offset);
         return local.format("%Y-%m-%d %H:%M:%S").to_string();
     }
     for fmt in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S"] {

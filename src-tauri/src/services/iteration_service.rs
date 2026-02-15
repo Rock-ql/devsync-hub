@@ -193,7 +193,15 @@ pub fn update_iteration(conn: &Connection, req: &IterationUpdateReq) -> AppResul
     Ok(())
 }
 
-pub fn delete_iteration(conn: &Connection, id: i32) -> AppResult<()> {
+pub fn delete_iteration(conn: &mut Connection, id: i32) -> AppResult<()> {
+    let tx = conn.transaction()?;
+    delete_iteration_inner(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// 在已有事务或连接上执行级联删除（不创建新事务）
+pub fn delete_iteration_inner(conn: &Connection, id: i32) -> AppResult<()> {
     conn.execute("UPDATE iteration SET deleted_at = datetime('now','localtime'), state = 0 WHERE id = ?", params![id])?;
     conn.execute("UPDATE iteration_project SET deleted_at = datetime('now','localtime'), state = 0 WHERE iteration_id = ?", params![id])?;
 

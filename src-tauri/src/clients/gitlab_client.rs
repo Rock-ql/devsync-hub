@@ -1,6 +1,7 @@
 use crate::error::{AppError, AppResult};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 pub struct GitLabClient {
     api_base_url: String,
@@ -37,11 +38,16 @@ impl GitLabClient {
     pub fn new(gitlab_url: &str, token: &str) -> Self {
         let raw_url = gitlab_url.trim().to_string();
         let api_base = parse_api_base_url(&raw_url);
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             api_base_url: api_base,
             raw_gitlab_url: raw_url,
             token: token.to_string(),
-            http: reqwest::Client::new(),
+            http,
         }
     }
 

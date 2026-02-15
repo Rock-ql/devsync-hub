@@ -95,9 +95,10 @@ pub fn run() {
         .setup(|app| {
             // 设置窗口图标
             if let Some(window) = app.get_webview_window("main") {
-                let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
-                    .expect("Failed to load window icon");
-                let _ = window.set_icon(icon);
+                match tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                    Ok(icon) => { let _ = window.set_icon(icon); }
+                    Err(e) => log::warn!("Failed to load window icon: {}", e),
+                }
             }
 
             let handle = app.handle().clone();

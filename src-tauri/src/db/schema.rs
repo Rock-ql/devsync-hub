@@ -216,5 +216,24 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
         WHERE committed_at LIKE '%T%';
     ")?;
 
+    // 常用查询索引
+    conn.execute_batch("
+        CREATE INDEX IF NOT EXISTS idx_requirement_iteration_id ON requirement(iteration_id);
+        CREATE INDEX IF NOT EXISTS idx_requirement_status ON requirement(status);
+        CREATE INDEX IF NOT EXISTS idx_pending_sql_project_id ON pending_sql(project_id);
+        CREATE INDEX IF NOT EXISTS idx_pending_sql_iteration_id ON pending_sql(iteration_id);
+        CREATE INDEX IF NOT EXISTS idx_pending_sql_status ON pending_sql(status);
+        CREATE INDEX IF NOT EXISTS idx_git_commit_project_id ON git_commit(project_id);
+        CREATE INDEX IF NOT EXISTS idx_git_commit_committed_at ON git_commit(committed_at);
+        CREATE INDEX IF NOT EXISTS idx_report_type_start_date ON report(type, start_date);
+        CREATE INDEX IF NOT EXISTS idx_iteration_project_iteration_id ON iteration_project(iteration_id);
+        CREATE INDEX IF NOT EXISTS idx_iteration_project_project_id ON iteration_project(project_id);
+        CREATE INDEX IF NOT EXISTS idx_requirement_project_requirement_id ON requirement_project(requirement_id);
+        CREATE INDEX IF NOT EXISTS idx_requirement_project_project_id ON requirement_project(project_id);
+        CREATE INDEX IF NOT EXISTS idx_work_item_link_work_item_id ON work_item_link(work_item_id);
+        CREATE INDEX IF NOT EXISTS idx_work_item_link_link_type_link_id ON work_item_link(link_type, link_id);
+        CREATE INDEX IF NOT EXISTS idx_sql_execution_log_sql_id ON sql_execution_log(sql_id);
+    ")?;
+
     Ok(())
 }
