@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{AppError, AppResult};
 use crate::models::requirement::*;
 use crate::models::common::PageResult;
@@ -212,11 +212,19 @@ pub fn list_requirement_commits(conn: &Connection, req: &RequirementCommitListRe
 }
 
 pub fn add_requirement(conn: &Connection, req: &RequirementAddReq) -> AppResult<i32> {
+    let requirement_code = req
+        .requirement_code
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    ensure_requirement_code_unique(conn, req.iteration_id, &requirement_code, None)?;
+
     conn.execute(
         "INSERT INTO requirement (iteration_id, name, requirement_code, environment, link, status, branch) VALUES (?, ?, ?, ?, ?, ?, ?)",
         params![
             req.iteration_id, req.name,
-            req.requirement_code.as_deref().unwrap_or(""),
+            requirement_code,
             req.environment.as_deref().unwrap_or(""),
             req.link.as_deref().unwrap_or(""),
             req.status.as_deref().unwrap_or("pending_dev"),
@@ -241,7 +249,13 @@ pub fn update_requirement(conn: &Connection, req: &RequirementUpdateReq) -> AppR
     let mut pv: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
 
     if let Some(v) = &req.name { sets.push("name = ?"); pv.push(Box::new(v.clone())); }
-    if let Some(v) = &req.requirement_code { sets.push("requirement_code = ?"); pv.push(Box::new(v.clone())); }
+    if let Some(v) = &req.requirement_code {
+        let requirement_code = v.trim().to_string();
+        let iteration_id = get_requirement_iteration_id(conn, req.id)?;
+        ensure_requirement_code_unique(conn, iteration_id, &requirement_code, Some(req.id))?;
+        sets.push("requirement_code = ?");
+        pv.push(Box::new(requirement_code));
+    }
     if let Some(v) = &req.environment { sets.push("environment = ?"); pv.push(Box::new(v.clone())); }
     if let Some(v) = &req.link { sets.push("link = ?"); pv.push(Box::new(v.clone())); }
     if let Some(v) = &req.status { sets.push("status = ?"); pv.push(Box::new(v.clone())); }
@@ -281,6 +295,63 @@ pub fn delete_requirement(conn: &Connection, id: i32) -> AppResult<()> {
     conn.execute("UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE work_item_id = ? AND state = 1", params![id])?;
     conn.execute("UPDATE work_item_link SET deleted_at = datetime('now','localtime'), state = 0 WHERE link_type = 'requirement' AND link_id = ? AND state = 1", params![id])?;
     Ok(())
+}
+
+fn ensure_requirement_code_unique(
+    conn: &Connection,
+    iteration_id: i32,
+    requirement_code: &str,
+    exclude_id: Option<i32>,
+) -> AppResult<()> {
+    let code = requirement_code.trim();
+    if code.is_empty() {
+        return Ok(());
+    }
+
+    let existing_id: Option<i32> = if let Some(exclude_id) = exclude_id {
+        conn.query_row(
+            "SELECT id FROM requirement
+             WHERE iteration_id = ?
+               AND state = 1
+               AND deleted_at IS NULL
+               AND TRIM(requirement_code) = ?
+               AND id <> ?
+             LIMIT 1",
+            params![iteration_id, code, exclude_id],
+            |row| row.get(0),
+        )
+        .optional()?
+    } else {
+        conn.query_row(
+            "SELECT id FROM requirement
+             WHERE iteration_id = ?
+               AND state = 1
+               AND deleted_at IS NULL
+               AND TRIM(requirement_code) = ?
+             LIMIT 1",
+            params![iteration_id, code],
+            |row| row.get(0),
+        )
+        .optional()?
+    };
+
+    if existing_id.is_some() {
+        return Err(AppError::BadRequest("需求编号已存在（同迭代内必须唯一）".into()));
+    }
+
+    Ok(())
+}
+
+fn get_requirement_iteration_id(conn: &Connection, requirement_id: i32) -> AppResult<i32> {
+    conn.query_row(
+        "SELECT iteration_id FROM requirement WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+        params![requirement_id],
+        |row| row.get(0),
+    )
+    .map_err(|error| match error {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound("Requirement not found".into()),
+        _ => AppError::Database(error),
+    })
 }
 
 pub fn link_requirement(conn: &Connection, req: &RequirementLinkReq) -> AppResult<()> {

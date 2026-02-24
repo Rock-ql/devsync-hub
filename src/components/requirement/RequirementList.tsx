@@ -31,6 +31,7 @@ export default function RequirementList({ iterationId, iterationName, projects }
   const [editingItem, setEditingItem] = useState<RequirementItem | null>(null)
   const [commitsDialogOpen, setCommitsDialogOpen] = useState(false)
   const [commitsRequirement, setCommitsRequirement] = useState<RequirementItem | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<RequirementItem | null>(null)
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
 
@@ -66,6 +67,7 @@ export default function RequirementList({ iterationId, iterationName, projects }
     mutationFn: (id: number) => requirementApi.remove(id),
     onSuccess: () => {
       toast.success('需求已删除')
+      setDeleteTarget(null)
       queryClient.invalidateQueries({ queryKey: ['requirements-page', iterationId] })
     },
     onError: (error: Error) => toast.error(error.message),
@@ -108,17 +110,13 @@ export default function RequirementList({ iterationId, iterationName, projects }
     setCommitsDialogOpen(true)
   }
 
-  const [deleteTarget, setDeleteTarget] = useState<RequirementItem | null>(null)
-
   const handleDelete = (item: RequirementItem) => {
     setDeleteTarget(item)
   }
 
   const confirmDelete = () => {
-    if (deleteTarget) {
-      deleteMutation.mutate(deleteTarget.id)
-      setDeleteTarget(null)
-    }
+    if (!deleteTarget || deleteMutation.isPending) return
+    deleteMutation.mutate(deleteTarget.id)
   }
 
   const displayProjects = (names: string[]) => {
@@ -143,12 +141,12 @@ export default function RequirementList({ iterationId, iterationName, projects }
             className="w-full sm:w-64"
           />
           {keyword ? (
-            <Button variant="secondary" size="sm" onClick={() => setKeyword('')}>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setKeyword('')}>
               清空
             </Button>
           ) : null}
         </div>
-        <Button variant="secondary" size="sm" onClick={handleOpenAdd}>
+        <Button type="button" variant="secondary" size="sm" onClick={handleOpenAdd}>
           <Plus className="h-4 w-4" />
           添加需求
         </Button>
@@ -185,14 +183,16 @@ export default function RequirementList({ iterationId, iterationName, projects }
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEdit(item)}>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEdit(item)}>
                     <Pencil className="h-4 w-4" />
                   </Button>
                   <Button
+                    type="button"
                     variant="ghost"
                     size="sm"
                     className="h-8 w-8 p-0 text-muted-foreground hover:text-red-600"
                     onClick={() => handleDelete(item)}
+                    disabled={deleteMutation.isPending}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -307,8 +307,18 @@ export default function RequirementList({ iterationId, iterationName, projects }
               : `确定删除需求「${deleteTarget?.name}」吗？`}
           </p>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>取消</Button>
-            <Button variant="primary" className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmDelete}>删除</Button>
+            <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)} disabled={deleteMutation.isPending}>
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={confirmDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? '删除中...' : '删除'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
