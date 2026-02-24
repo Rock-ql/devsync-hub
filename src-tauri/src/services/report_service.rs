@@ -10,6 +10,7 @@ const NEAREST_ANCHOR_MAX_MINUTES: i64 = 30;
 
 #[derive(Debug, Clone)]
 struct CommitInfo {
+    id: i32,
     project_id: i32,
     project_name: String,
     message: String,
@@ -171,7 +172,7 @@ pub fn generate_report_prepare(conn: &Connection, req: &ReportGenerateReq) -> Ap
 }
 
 fn query_commits(conn: &Connection, req: &ReportGenerateReq) -> AppResult<Vec<CommitInfo>> {
-    let mut sql = "SELECT gc.commit_id, gc.project_id, p.name, gc.message, gc.branch, gc.committed_at FROM git_commit gc \
+    let mut sql = "SELECT gc.id, gc.commit_id, gc.project_id, p.name, gc.message, gc.branch, gc.committed_at FROM git_commit gc \
         INNER JOIN project p ON gc.project_id = p.id \
         WHERE gc.state = 1 AND gc.deleted_at IS NULL \
           AND p.state = 1 AND p.deleted_at IS NULL \
@@ -210,11 +211,12 @@ fn query_commits(conn: &Connection, req: &ReportGenerateReq) -> AppResult<Vec<Co
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(refs.as_slice(), |row| {
         Ok(CommitInfo {
-            project_id: row.get(1)?,
-            project_name: row.get(2)?,
-            message: row.get(3)?,
-            branch: row.get(4)?,
-            committed_at: row.get(5)?,
+            id: row.get(0)?,
+            project_id: row.get(2)?,
+            project_name: row.get(3)?,
+            message: row.get(4)?,
+            branch: row.get(5)?,
+            committed_at: row.get(6)?,
         })
     })?;
 
@@ -278,10 +280,27 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
     let requirement_ids: Vec<i32> = coded_requirements.iter().map(|item| item.requirement.id).collect();
     let requirement_project_ids = load_requirement_project_ids(conn, &requirement_ids)?;
 
+    // 优先使用 work_item_link 中已有的 commit-requirement 关联
+    let commit_ids: Vec<i32> = display_commits.iter().map(|c| c.id).collect();
+    let existing_links = load_commit_requirement_links(conn, &commit_ids);
+    let valid_requirement_ids: HashSet<i32> = coded_requirements.iter().map(|cr| cr.requirement.id).collect();
+
     let mut requirement_commits: HashMap<i32, Vec<CommitInfo>> = HashMap::new();
     let mut other_commits: Vec<CommitInfo> = Vec::new();
 
     for commit in &display_commits {
+        // 策略1: 先查 work_item_link 已有关联
+        if let Some(&req_id) = existing_links.get(&commit.id) {
+            if valid_requirement_ids.contains(&req_id) {
+                requirement_commits
+                    .entry(req_id)
+                    .or_default()
+                    .push(commit.clone());
+                continue;
+            }
+        }
+
+        // 策略2: 回退到原有匹配逻辑（分支/消息/项目）
         if let Some(requirement_id) = match_requirement(commit, &coded_requirements, &requirement_project_ids) {
             requirement_commits
                 .entry(requirement_id)
@@ -337,6 +356,56 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
     output.push_str("## 其他工作:\n");
     append_other_work_by_project(&mut output, &other_commits);
     Ok(output.trim().to_string())
+}
+
+/// 从 work_item_link 表加载 commit -> requirement 的已有关联
+/// work_item_link 中 work_item_id = requirement_id, link_type = 'commit', link_id = git_commit.id
+fn load_commit_requirement_links(conn: &Connection, commit_ids: &[i32]) -> HashMap<i32, i32> {
+    if commit_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let placeholders: Vec<String> = commit_ids.iter().map(|_| "?".to_string()).collect();
+    let sql = format!(
+        "SELECT link_id, work_item_id FROM work_item_link \
+         WHERE link_type = 'commit' AND state = 1 AND deleted_at IS NULL \
+         AND link_id IN ({})",
+        placeholders.join(",")
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    for id in commit_ids {
+        params_vec.push(Box::new(*id));
+    }
+    let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec
+        .iter()
+        .map(|value| value.as_ref() as &dyn rusqlite::types::ToSql)
+        .collect();
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(stmt) => stmt,
+        Err(err) => {
+            log::warn!("[报告生成] 查询 work_item_link 失败: {}", err);
+            return HashMap::new();
+        }
+    };
+
+    let rows = match stmt.query_map(refs.as_slice(), |row| {
+        Ok((row.get::<_, i32>(0)?, row.get::<_, i32>(1)?))
+    }) {
+        Ok(rows) => rows,
+        Err(err) => {
+            log::warn!("[报告生成] 读取 work_item_link 行失败: {}", err);
+            return HashMap::new();
+        }
+    };
+
+    let mut result: HashMap<i32, i32> = HashMap::new();
+    for item in rows.filter_map(|r| r.ok()) {
+        // item.0 = link_id (git_commit.id), item.1 = work_item_id (requirement_id)
+        result.insert(item.0, item.1);
+    }
+    result
 }
 
 fn load_active_requirements(conn: &Connection) -> AppResult<Vec<Requirement>> {
@@ -408,6 +477,7 @@ fn match_requirement(
 ) -> Option<i32> {
     let branch_candidates = parse_branch_candidates(&commit.branch);
 
+    // 策略1: 提交所在分支包含需求编号（如分支名 feature/ABC-123）
     for requirement in requirements {
         let requirement_code = requirement.code.to_lowercase();
         if !requirement_code.is_empty()
@@ -419,6 +489,7 @@ fn match_requirement(
         }
     }
 
+    // 策略2: 提交消息中包含需求编号
     let message_code = extract_requirement_code_from_text(&commit.message);
     if !message_code.is_empty() {
         for requirement in requirements {
@@ -428,6 +499,16 @@ fn match_requirement(
         }
     }
 
+    // 策略3: 提交消息中包含需求的分支名（如 merge commit 消息 "Merge branch 'feature/ABC-123'"）
+    let message_lower = commit.message.trim().to_lowercase();
+    for requirement in requirements {
+        let req_branch = requirement.requirement.branch.trim().to_lowercase();
+        if !req_branch.is_empty() && message_lower.contains(&req_branch) {
+            return Some(requirement.requirement.id);
+        }
+    }
+
+    // 策略4: 提交所属项目只关联了一个需求
     let mut project_matched_ids: Vec<i32> = Vec::new();
     for requirement in requirements {
         if let Some(project_ids) = requirement_project_ids.get(&requirement.requirement.id) {
@@ -519,7 +600,12 @@ fn get_requirement_code(requirement: &Requirement) -> String {
     if !configured.is_empty() {
         return configured;
     }
-    extract_requirement_code_from_text(&requirement.name)
+    let from_name = extract_requirement_code_from_text(&requirement.name);
+    if !from_name.is_empty() {
+        return from_name;
+    }
+    // 尝试从需求关联的分支名中提取编号（如 feature/ABC-123）
+    extract_requirement_code_from_text(&requirement.branch)
 }
 
 fn extract_requirement_code_from_text(text: &str) -> String {
