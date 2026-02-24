@@ -86,4 +86,5 @@ jobs:
           releaseBody: ''
           releaseDraft: false
           prerelease: false
+          updaterJsonPreferNsis: true
           args: --target ${{ matrix.target }}
