@@ -252,12 +252,16 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
         .cloned()
         .collect();
 
+    log::info!("[日报生成] 总提交数: {}, 过滤merge后: {}", commits.len(), display_commits.len());
+
     if display_commits.is_empty() {
         return Ok("暂无提交记录".to_string());
     }
 
     let requirements = load_active_requirements(conn)?;
+    log::info!("[日报生成] 活跃需求数: {}", requirements.len());
     if requirements.is_empty() {
+        log::warn!("[日报生成] 无活跃需求，回退到按项目分组");
         return Ok(render_daily_other_work_only(&display_commits));
     }
 
@@ -273,7 +277,12 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
         })
         .collect();
 
+    log::info!("[日报生成] 有编号的需求数: {}", coded_requirements.len());
+    for cr in &coded_requirements {
+        log::info!("[日报生成] 需求: id={}, code={}, branch={}", cr.requirement.id, cr.code, cr.requirement.branch);
+    }
     if coded_requirements.is_empty() {
+        log::warn!("[日报生成] 所有需求均无编号，回退到按项目分组");
         return Ok(render_daily_other_work_only(&display_commits));
     }
 
@@ -283,10 +292,31 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
     // 优先使用 work_item_link 中已有的 commit-requirement 关联
     let commit_ids: Vec<i32> = display_commits.iter().map(|c| c.id).collect();
     let existing_links = load_commit_requirement_links(conn, &commit_ids);
+    log::info!("[日报生成] work_item_link 已有关联数: {}", existing_links.len());
+    for commit in &display_commits {
+        let msg_preview: String = commit.message.chars().take(40).collect();
+        log::info!("[日报生成] 提交: id={}, branch={}, msg={}", commit.id, commit.branch, msg_preview);
+    }
     let valid_requirement_ids: HashSet<i32> = coded_requirements.iter().map(|cr| cr.requirement.id).collect();
 
     let mut requirement_commits: HashMap<i32, Vec<CommitInfo>> = HashMap::new();
     let mut other_commits: Vec<CommitInfo> = Vec::new();
+
+    // 策略0: 扫描 merge commit，建立需求锚点（merge commit 消息含 feature 分支名）
+    // 用独立 map 存锚点，不污染 requirement_commits（merge commit 不输出到报告）
+    let mut merge_anchors: HashMap<i32, Vec<CommitInfo>> = HashMap::new();
+    for commit in commits {
+        if !is_merge_commit(&commit.message) {
+            continue;
+        }
+        if let Some(req_id) = match_requirement(commit, &coded_requirements, &requirement_project_ids) {
+            merge_anchors
+                .entry(req_id)
+                .or_default()
+                .push(commit.clone());
+        }
+    }
+    log::info!("[日报生成] merge commit 锚点匹配后，需求命中数: {}", merge_anchors.len());
 
     for commit in &display_commits {
         // 策略1: 先查 work_item_link 已有关联
@@ -311,9 +341,28 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
         }
     }
 
+    // 将 merge_anchors 合并进 requirement_commits 用于时间邻近分配
+    for (req_id, anchors) in &merge_anchors {
+        requirement_commits.entry(*req_id).or_default().extend(anchors.clone());
+    }
     other_commits = assign_unmatched_commits_by_nearest_anchor(other_commits, &mut requirement_commits);
+    // 移除纯 merge commit 锚点（不输出到报告）
+    for (req_id, anchors) in &merge_anchors {
+        if let Some(v) = requirement_commits.get_mut(req_id) {
+            v.retain(|c| !anchors.iter().any(|a| a.id == c.id));
+            if v.is_empty() {
+                requirement_commits.remove(req_id);
+            }
+        }
+    }
+
+    log::info!("[日报生成] 匹配到需求的提交数: {}, 未匹配: {}",
+        requirement_commits.values().map(|v| v.len()).sum::<usize>(),
+        other_commits.len()
+    );
 
     if requirement_commits.is_empty() {
+        log::warn!("[日报生成] 无提交匹配到需求，回退到按项目分组");
         return Ok(render_daily_other_work_only(&display_commits));
     }
 
@@ -518,6 +567,9 @@ fn match_requirement(
         }
     }
 
+    log::debug!("[日报匹配] commit.id={} project_id={} project_matched_ids={:?}",
+        commit.id, commit.project_id, project_matched_ids);
+
     if project_matched_ids.len() == 1 {
         project_matched_ids.first().copied()
     } else {
@@ -576,7 +628,7 @@ fn assign_unmatched_commits_by_nearest_anchor(
 
         for anchor in anchors {
             let minutes = (commit_time - anchor.committed_at).num_minutes().abs();
-            if minutes <= NEAREST_ANCHOR_MAX_MINUTES && minutes < nearest_minutes {
+            if anchor.committed_at.date_naive() == commit_time.date_naive() && minutes < nearest_minutes {
                 nearest_minutes = minutes;
                 nearest_requirement_id = Some(anchor.requirement_id);
             }
