@@ -1,6 +1,6 @@
 [package]
 name = "devsync-hub"
-version = "2.0.2"
+version = "2.0.3"
 description = "DevSync Hub - 跨平台项目进度管理桌面客户端"
 authors = ["rockcoder"]
 edition = "2021"
@@ -37,5 +37,6 @@ futures = "0.3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
 
 
