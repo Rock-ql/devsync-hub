@@ -27,6 +27,14 @@ export interface ImportResult {
   tables: { table: string; count: number }[];
 }
 
+export function buildSettingMap(settings: SystemSetting[] | null | undefined): Record<string, string> {
+  if (!Array.isArray(settings)) return {}
+  return settings.reduce<Record<string, string>>((acc, item) => {
+    acc[item.setting_key] = item.setting_value
+    return acc
+  }, {})
+}
+
 export const settingApi = {
   getAll: () =>
     invoke<SystemSetting[]>("get_all_settings"),

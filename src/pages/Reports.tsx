@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { reportApi, ReportBrief } from '@/api/report'
-import { settingApi } from '@/api/setting'
+import { buildSettingMap, settingApi } from '@/api/setting'
 import {
   addDays,
   addMonths,
@@ -116,14 +116,10 @@ export default function Reports() {
 
   // --- React Query ---
   const { data: settingsData } = useQuery({
-    queryKey: ['settings'],
+    queryKey: ['settings', 'list'],
     queryFn: () => settingApi.getAll(),
   })
-  const settings = useMemo(() => {
-    const map: Record<string, string> = {}
-    settingsData?.forEach((s) => { map[s.setting_key] = s.setting_value })
-    return map
-  }, [settingsData])
+  const settings = useMemo(() => buildSettingMap(settingsData), [settingsData])
 
   const safeSelectedMonth = useMemo(() => toValidDate(selectedMonth, startOfMonth(safeToday)), [selectedMonth, safeToday])
   const monthStart = useMemo(() => startOfMonth(safeSelectedMonth), [safeSelectedMonth])

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { settingApi, type ImportResult } from '@/api/setting'
+import { buildSettingMap, settingApi, type ImportResult } from '@/api/setting'
 import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -48,14 +48,9 @@ export default function Settings() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
-    queryKey: ['settings'],
-    queryFn: async () => {
-      const list = await settingApi.getAll()
-      return list.reduce<Record<string, string>>((acc, item) => {
-        acc[item.setting_key] = item.setting_value
-        return acc
-      }, {})
-    },
+    queryKey: ['settings', 'map'],
+    queryFn: () => settingApi.getAll(),
+    select: buildSettingMap,
   })
 
   const [settingForm, setSettingForm] = useState<Record<string, string>>({})
