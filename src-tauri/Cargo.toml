@@ -1,6 +1,6 @@
 [package]
 name = "devsync-hub"
-version = "2.0.3"
+version = "2.0.4"
 description = "DevSync Hub - 跨平台项目进度管理桌面客户端"
 authors = ["rockcoder"]
 edition = "2021"
@@ -44,3 +44,4 @@ lto = true
 codegen-units = 1
 opt-level = "s"
 panic = "abort"
+
