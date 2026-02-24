@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingApi, type ImportResult } from '@/api/setting'
-import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download } from 'lucide-react'
+import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -10,6 +10,12 @@ import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  checkForAppUpdate,
+  getCurrentAppVersion,
+  installAppUpdate,
+  type AppUpdateHandle,
+} from '@/lib/updater'
 
 const SETTING_KEYS = {
   DEEPSEEK_API_KEY: 'deepseek.api.key',
@@ -29,6 +35,16 @@ export default function Settings() {
   const [newKeyValue, setNewKeyValue] = useState('')
   const [copied, setCopied] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [appVersion, setAppVersion] = useState('-')
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false)
+  const [updateHandle, setUpdateHandle] = useState<AppUpdateHandle | null>(null)
+  const [updateLatestVersion, setUpdateLatestVersion] = useState('')
+  const [updateReleaseDate, setUpdateReleaseDate] = useState('')
+  const [updateBody, setUpdateBody] = useState('')
+  const [updateStatus, setUpdateStatus] = useState('尚未检查更新')
+  const [downloadedBytes, setDownloadedBytes] = useState(0)
+  const [totalBytes, setTotalBytes] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
@@ -126,6 +142,98 @@ export default function Settings() {
     reader.readAsText(file)
     e.target.value = ''
   }
+
+  useEffect(() => {
+    let cancelled = false
+    void getCurrentAppVersion()
+      .then((version) => {
+        if (!cancelled) {
+          setAppVersion(version)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAppVersion('-')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleCheckAppUpdate = async () => {
+    setIsCheckingUpdate(true)
+    setUpdateStatus('正在检查更新...')
+    setDownloadedBytes(0)
+    setTotalBytes(null)
+
+    try {
+      const result = await checkForAppUpdate()
+      setAppVersion(result.currentVersion)
+
+      if (!result.available || !result.update || !result.latestVersion) {
+        setUpdateHandle(null)
+        setUpdateLatestVersion('')
+        setUpdateReleaseDate('')
+        setUpdateBody('')
+        setUpdateStatus('当前已是最新版本')
+        return
+      }
+
+      setUpdateHandle(result.update)
+      setUpdateLatestVersion(result.latestVersion)
+      setUpdateReleaseDate(result.date || '')
+      setUpdateBody(result.body || '')
+      setUpdateStatus(`发现新版本 ${result.latestVersion}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setUpdateStatus(`检查失败：${message}`)
+    } finally {
+      setIsCheckingUpdate(false)
+    }
+  }
+
+  const handleInstallAppUpdate = async () => {
+    if (!updateHandle || isInstallingUpdate) return
+
+    setIsInstallingUpdate(true)
+    setUpdateStatus('正在下载更新...')
+    setDownloadedBytes(0)
+    setTotalBytes(null)
+
+    try {
+      await installAppUpdate(updateHandle, (event) => {
+        if (event.event === 'Started') {
+          setTotalBytes(event.data.contentLength ?? null)
+          setDownloadedBytes(0)
+          setUpdateStatus('开始下载更新包...')
+          return
+        }
+
+        if (event.event === 'Progress') {
+          setDownloadedBytes((prev) => prev + event.data.chunkLength)
+          setUpdateStatus('正在下载更新包...')
+          return
+        }
+
+        setUpdateStatus('下载完成，正在安装...')
+      })
+
+      setUpdateHandle(null)
+      setUpdateStatus('更新安装完成，请重启应用以应用新版本')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setUpdateStatus(`安装失败：${message}`)
+    } finally {
+      setIsInstallingUpdate(false)
+    }
+  }
+
+  const progressPercent =
+    totalBytes && totalBytes > 0
+      ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
+      : null
 
   return (
     <div className="space-y-10">
@@ -254,6 +362,68 @@ export default function Settings() {
                   </Button>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>应用更新</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <Badge variant="soft" tone="neutral">当前版本 {appVersion}</Badge>
+                {updateLatestVersion ? (
+                  <Badge variant="soft" tone="info">可更新至 {updateLatestVersion}</Badge>
+                ) : null}
+                {updateReleaseDate ? (
+                  <Badge variant="soft" tone="neutral">发布时间 {updateReleaseDate.split('T')[0]}</Badge>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleCheckAppUpdate}
+                  disabled={isCheckingUpdate || isInstallingUpdate}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  {isCheckingUpdate ? '检查中...' : '检查更新'}
+                </Button>
+
+                <Button
+                  type="button"
+                  onClick={handleInstallAppUpdate}
+                  disabled={!updateHandle || isCheckingUpdate || isInstallingUpdate}
+                >
+                  {isInstallingUpdate ? '更新中...' : '立即更新'}
+                </Button>
+              </div>
+
+              <p className="text-sm text-muted-foreground">{updateStatus}</p>
+
+              {progressPercent !== null ? (
+                <div className="space-y-2">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full bg-[hsl(var(--accent))] transition-all"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    下载进度 {progressPercent}% · {downloadedBytes} / {totalBytes || 0} bytes
+                  </p>
+                </div>
+              ) : null}
+
+              {updateBody ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">更新说明</p>
+                  <pre className="max-h-40 overflow-auto rounded-xl border border-border/60 bg-muted/60 p-3 text-xs text-foreground whitespace-pre-wrap">
+                    {updateBody}
+                  </pre>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </TabsContent>

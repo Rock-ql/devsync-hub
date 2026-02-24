@@ -1,0 +1,67 @@
+name: Auto Version Bump
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: version-bump-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bump-and-release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump patch version
+        id: bump
+        run: node scripts/bump-version.mjs
+
+      - name: Commit and push version files
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          if git diff --staged --quiet; then
+            echo "No version changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(release): bump version to v${NEW_VERSION} [skip ci]"
+          git tag "v${NEW_VERSION}"
+          git push origin HEAD:main --follow-tags
+
+      - name: Trigger release workflow
+        uses: actions/github-script@v7
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release.yml',
+              ref: 'main',
+              inputs: {
+                tag: `v${process.env.NEW_VERSION}`
+              }
+            })
+

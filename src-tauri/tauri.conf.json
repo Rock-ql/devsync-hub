@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -35,5 +36,15 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": false,
+      "dialog": false,
+      "endpoints": [
+        "https://github.com/Rock-ql/devsync-hub/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
   }
 }

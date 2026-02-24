@@ -6,5 +6,5 @@ pub fn health_routes() -> Router {
 }
 
 async fn health_check() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok", "version": "2.0.0" }))
+    Json(json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
 }

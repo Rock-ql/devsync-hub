@@ -1,12 +1,15 @@
 name: Build & Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
         description: 'Release tag (e.g. v2.0.0)'
-        required: true
-        default: 'v2.0.0'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -33,6 +36,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -z "${{ inputs.tag }}" ]]; then
+            echo "workflow_dispatch 必须传入 tag 输入参数"
+            exit 1
+          fi
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -52,13 +69,20 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Inject updater pubkey
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: node scripts/inject-updater-pubkey.mjs
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ inputs.tag }}
-          releaseName: 'DevSync Hub ${{ inputs.tag }}'
+          tagName: ${{ steps.meta.outputs.tag }}
+          releaseName: 'DevSync Hub ${{ steps.meta.outputs.tag }}'
           releaseBody: ''
           releaseDraft: false
           prerelease: false

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSSE } from '@/hooks/useSSE'
+import { checkForAppUpdate } from '@/lib/updater'
 import { toast } from '@/components/ui/toaster'
 
 const navigation = [
@@ -110,6 +111,32 @@ export default function Layout() {
     return () => {
       syncToastRef.current.forEach((toastRef) => toastRef.dismiss())
       syncToastRef.current.clear()
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const runAutoCheck = async () => {
+      try {
+        const result = await checkForAppUpdate()
+        if (cancelled || !result.available || !result.latestVersion) return
+        toast({
+          title: '发现新版本',
+          description: `检测到 ${result.latestVersion}，请前往系统设置执行在线更新。`,
+          duration: 6000,
+        })
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('自动检查更新失败:', error)
+        }
+      }
+    }
+
+    void runAutoCheck()
+
+    return () => {
+      cancelled = true
     }
   }, [])
 

@@ -22,6 +22,7 @@
 - **日报/周报** — 基于 Git 提交自动生成，支持 DeepSeek AI 润色
 - **仪表盘** — 项目概览、提交统计、待办汇总
 - **数据迁移** — 支持从 Web 版 (PostgreSQL) 导入数据，支持导出备份
+- **自动更新** — 启动自动检查更新，设置页支持手动检查与在线更新安装
 
 ## 快速开始
 
@@ -52,6 +53,29 @@ cargo tauri build
 ```
 
 产物位于 `src-tauri/target/release/bundle/`。
+
+## 自动更新与发布
+
+### 客户端更新
+
+1. 应用启动后会自动静默检查更新。
+2. 在 **设置 → 基础设置 → 应用更新** 可以手动检查并执行在线更新。
+3. 更新安装完成后，需要重启应用以生效。
+
+### 仓库 Secrets（GitHub Actions）
+
+| Secret 名称 | 说明 |
+|------|------|
+| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater 签名私钥 |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 签名私钥密码 |
+| `TAURI_UPDATER_PUBKEY` | 对应公钥（发布时注入到 `tauri.conf.json`） |
+
+### 自动发布流程
+
+1. 每次 `push main` 触发 `.github/workflows/version-bump.yml`
+2. 工作流自动执行 `patch + 1`，同步版本到 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`
+3. 自动提交版本变更并创建 tag（`vX.Y.Z`）
+4. 自动触发 `.github/workflows/release.yml` 进行多平台打包与 GitHub Release 发布
 
 ## 项目结构
 
@@ -98,7 +122,9 @@ devSync_hub/
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 ├── scripts/
-│   └── export-pg-data.js       # PG → JSON 数据导出脚本
+│   ├── export-pg-data.js       # PG → JSON 数据导出脚本
+│   ├── bump-version.mjs        # 自动 patch 版本递增脚本
+│   └── inject-updater-pubkey.mjs # 发布时注入 updater 公钥
 ├── package.json
 └── vite.config.ts
 ```
