@@ -402,8 +402,10 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
         return Ok(render_daily_other_work_only(&display_commits));
     }
 
-    output.push_str("## 其他工作:\n");
-    append_other_work_by_project(&mut output, &other_commits);
+    if !other_commits.is_empty() {
+        output.push_str("## 其他工作:\n");
+        append_other_work_by_project(&mut output, &other_commits);
+    }
     Ok(output.trim().to_string())
 }
 

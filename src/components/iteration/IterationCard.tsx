@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { CalendarClock, ChevronDown, ChevronRight, CircleDot, Database, Pencil, Target, Trash2 } from 'lucide-react'
 
 export interface IterationCardProps {
   iteration: IterationDetail
@@ -43,9 +44,43 @@ const StatLabel = ({ label }: { label: string }) => (
   <span className="text-sm font-medium text-muted-foreground">{label}</span>
 )
 
-const StatPanel = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="flex min-h-[132px] flex-col justify-between rounded-2xl border border-border/60 bg-muted/20 p-4">
-    <StatLabel label={label} />
+const statusTone = (status?: string): 'info' | 'warning' | 'accent' | 'success' => {
+  if (status === 'released') return 'success'
+  if (status === 'testing') return 'warning'
+  if (status === 'developing') return 'info'
+  return 'accent'
+}
+
+const statusLabel = (status?: string) => STATUS_OPTIONS.find((option) => option.value === status)?.label ?? '未知状态'
+
+const StatPanel = ({
+  label,
+  icon,
+  className,
+  stripeClassName,
+  children,
+}: {
+  label: string
+  icon?: ReactNode
+  className?: string
+  stripeClassName?: string
+  children: ReactNode
+}) => (
+  <div
+    className={cn(
+      'relative flex min-h-[142px] flex-col justify-between overflow-hidden rounded-2xl border border-border/60 p-4 shadow-sm',
+      className
+    )}
+  >
+    <div className={cn('absolute inset-x-0 top-0 h-1 bg-[hsl(var(--accent))]/40', stripeClassName)} />
+    <div className="flex items-center justify-between gap-3">
+      <StatLabel label={label} />
+      {icon ? (
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-background/80 text-muted-foreground">
+          {icon}
+        </div>
+      ) : null}
+    </div>
     {children}
   </div>
 )
@@ -91,33 +126,59 @@ export default function IterationCard({
         </div>
       </div>
 
-      <div className="border-t border-border/60 bg-muted/10 p-5">
+      <div className="border-t border-border/60 bg-gradient-to-r from-muted/30 via-background to-muted/20 p-5">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <StatPanel label="状态">
-            <Select value={iteration.status} onValueChange={onStatusChange}>
-              <SelectTrigger size="md" className="h-11 border-border/70 bg-background shadow-sm">
-                <SelectValue placeholder="选择状态" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <StatPanel
+            label="状态"
+            icon={<CircleDot className="h-4 w-4" />}
+            className="bg-gradient-to-br from-background to-[hsl(var(--accent))]/[0.06]"
+            stripeClassName="bg-gradient-to-r from-[hsl(var(--accent))]/55 to-[hsl(var(--accent-secondary))]/45"
+          >
+            <div className="space-y-3">
+              <Badge tone={statusTone(iteration.status)} variant="soft" className="w-fit px-2.5 py-1 text-xs font-semibold">
+                {statusLabel(iteration.status)}
+              </Badge>
+              <Select value={iteration.status} onValueChange={onStatusChange}>
+                <SelectTrigger size="md" className="h-11 border-border/70 bg-background shadow-sm">
+                  <SelectValue placeholder="选择状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </StatPanel>
 
-          <StatPanel label="时间范围">
-            <p className="text-lg font-semibold leading-snug text-foreground">
+          <StatPanel
+            label="时间范围"
+            icon={<CalendarClock className="h-4 w-4" />}
+            className="bg-gradient-to-br from-background to-slate-100/60"
+            stripeClassName="bg-slate-300/80"
+          >
+            <p className="text-xl font-semibold leading-snug text-foreground">
               {formatRange(iteration.start_date, iteration.end_date)}
             </p>
+            <p className="text-xs text-muted-foreground">用于规划交付节奏</p>
           </StatPanel>
 
-          <StatPanel label="待执行 SQL">
+          <StatPanel
+            label="待执行 SQL"
+            icon={<Database className="h-4 w-4" />}
+            className={cn(
+              'bg-gradient-to-br',
+              pendingSqlCount > 0 ? 'from-amber-50/70 to-amber-100/45 border-amber-200/70' : 'from-emerald-50/70 to-emerald-100/45 border-emerald-200/70'
+            )}
+            stripeClassName={pendingSqlCount > 0 ? 'bg-amber-400/90' : 'bg-emerald-400/90'}
+          >
             <div className="space-y-3">
               <div className="flex items-end justify-between">
-                <span className="text-3xl font-semibold leading-none tabular-nums text-foreground">{pendingSqlCount}</span>
+                <span className={cn('text-4xl font-semibold leading-none tabular-nums', pendingSqlCount > 0 ? 'text-amber-700' : 'text-emerald-700')}>
+                  {pendingSqlCount}
+                </span>
                 <Badge tone={sqlTone(pendingSqlCount)} variant="soft" className="px-3 py-1 text-sm font-medium">
                   {pendingSqlCount > 0 ? '待处理' : '空闲'}
                 </Badge>
@@ -126,9 +187,14 @@ export default function IterationCard({
             </div>
           </StatPanel>
 
-          <StatPanel label="关联需求">
+          <StatPanel
+            label="关联需求"
+            icon={<Target className="h-4 w-4" />}
+            className="bg-gradient-to-br from-background to-sky-100/55"
+            stripeClassName="bg-sky-400/90"
+          >
             <div className="space-y-3">
-              <p className="text-3xl font-semibold leading-none tabular-nums text-foreground">{requirementCount}</p>
+              <p className="text-4xl font-semibold leading-none tabular-nums text-sky-700">{requirementCount}</p>
               <Button
                 variant="secondary"
                 className="h-10 w-full justify-between border border-border/70 bg-background/80 px-3 text-sm"
