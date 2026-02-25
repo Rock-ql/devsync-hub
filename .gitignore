@@ -16,3 +16,5 @@ yarn-debug.log*
 pnpm-debug.log*
 bun.lockb
 .claude/
+.tmp/
+_bmad/
