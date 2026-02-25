@@ -84,7 +84,7 @@ export default function IterationCard({
         <div className="space-y-2">
           <StatLabel label="状态" />
           <Select value={iteration.status} onValueChange={onStatusChange}>
-            <SelectTrigger size="lg" className="justify-between">
+            <SelectTrigger size="md" className="justify-between">
               <SelectValue placeholder="选择状态" />
             </SelectTrigger>
             <SelectContent>
@@ -108,12 +108,7 @@ export default function IterationCard({
         </div>
         <div className="space-y-2">
           <StatLabel label="关联需求" />
-          <Button
-            variant="outline"
-            className="w-full justify-between"
-            onClick={onToggleRequirements}
-            size="lg"
-          >
+          <Button variant="secondary" className="w-full justify-between" onClick={onToggleRequirements} size="lg">
             <span>{iteration.requirement_count || 0} 条</span>
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
