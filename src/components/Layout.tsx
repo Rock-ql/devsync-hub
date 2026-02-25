@@ -25,7 +25,7 @@ const navigation = [
   { name: '仪表盘', href: '/', icon: LayoutDashboard },
   { name: '项目管理', href: '/projects', icon: FolderGit2 },
   { name: '迭代管理', href: '/iterations', icon: IterationCw },
-  { name: 'SQL管理', href: '/sql', icon: Database },
+  { name: '执行事项', href: '/sql', icon: Database },
   { name: '日报周报', href: '/reports', icon: FileText },
   { name: '系统设置', href: '/settings', icon: Settings },
 ]

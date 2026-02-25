@@ -58,7 +58,7 @@ export default function Dashboard() {
       sub: `共 ${data?.iteration_count || 0} 个`,
     },
     {
-      name: '待执行 SQL',
+      name: '待执行事项',
       value: data?.pending_sql_count || 0,
       icon: Database,
       sub: data?.pending_sql_count ? '需处理' : '已清零',
@@ -215,7 +215,7 @@ export default function Dashboard() {
                     </Link>
                     {project.pending_sql_count > 0 ? (
                       <Badge tone="warning" variant="soft" className="shrink-0">
-                        {project.pending_sql_count} SQL
+                        {project.pending_sql_count} 条
                       </Badge>
                     ) : (
                       <Badge tone="success" variant="soft" className="shrink-0">
@@ -263,7 +263,7 @@ export default function Dashboard() {
         </motion.div>
       </motion.section>
 
-      {/* Row 4: Pending SQL + Recent Reports */}
+      {/* Row 4: 待执行事项 + Recent Reports */}
       <motion.section
         variants={stagger}
         initial="hidden"
@@ -274,7 +274,7 @@ export default function Dashboard() {
         <motion.div variants={fadeInUp}>
           <Card className="h-full">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">待执行 SQL</CardTitle>
+              <CardTitle className="text-base">待执行事项</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               {data?.pending_sql_by_project?.length ? (
@@ -292,7 +292,7 @@ export default function Dashboard() {
                   </div>
                 ))
               ) : (
-                <EmptyPlaceholder text="无待执行 SQL" />
+                <EmptyPlaceholder text="无待执行事项" />
               )}
             </CardContent>
           </Card>

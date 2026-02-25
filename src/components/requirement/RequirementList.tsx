@@ -221,7 +221,7 @@ export default function RequirementList({ iterationId, iterationName, projects }
                     {item.branch}
                   </Badge>
                 )}
-                <Badge variant="soft" tone="info">SQL {item.sql_count || 0}</Badge>
+                <Badge variant="soft" tone="info">执行事项 {item.sql_count || 0}</Badge>
                 <button
                   type="button"
                   className="focus:outline-none"

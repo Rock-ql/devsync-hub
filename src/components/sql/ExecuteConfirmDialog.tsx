@@ -51,7 +51,7 @@ export function ExecuteConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 text-sm text-muted-foreground">
-          <div>SQL：{sqlTitle}</div>
+          <div>事项：{sqlTitle}</div>
           {!isDetail && envOptions?.length ? (
             <div className="space-y-2">
               <Label>执行环境</Label>

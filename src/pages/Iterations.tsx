@@ -125,7 +125,7 @@ export default function Iterations() {
     openConfirm(
       {
         title: '删除迭代？',
-        description: `删除「${iteration.name}」将级联删除 ${requirementCount} 条需求及 ${sqlCount} 条 SQL（含执行记录）。`,
+        description: `删除「${iteration.name}」将级联删除 ${requirementCount} 条需求及 ${sqlCount} 条执行事项（含执行记录）。`,
         confirmText: '删除',
       },
       () => deleteMutation.mutate(iteration.id),

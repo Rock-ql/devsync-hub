@@ -278,9 +278,9 @@ export default function Projects() {
                 <div className="flex flex-wrap gap-2">
                   <Badge tone="info" variant="soft">{project.iteration_count ?? 0} 个迭代</Badge>
                   {(project.pending_sql_count ?? 0) > 0 ? (
-                    <Badge tone="warning" variant="soft">{project.pending_sql_count ?? 0} 条 SQL 待执行</Badge>
+                    <Badge tone="warning" variant="soft">{project.pending_sql_count ?? 0} 条执行事项待处理</Badge>
                   ) : (
-                    <Badge tone="success" variant="soft">SQL 清零</Badge>
+                    <Badge tone="success" variant="soft">执行事项已清零</Badge>
                   )}
                   {Boolean(project.gitlab_url?.trim()) && (
                     <Badge tone="accent" variant="outline">GitLab 已连接</Badge>
@@ -387,7 +387,7 @@ export default function Projects() {
               <TabsTrigger value="overview">概览</TabsTrigger>
               <TabsTrigger value="commits">Git 记录</TabsTrigger>
               <TabsTrigger value="iterations">迭代</TabsTrigger>
-              <TabsTrigger value="sql">SQL</TabsTrigger>
+              <TabsTrigger value="sql">执行事项</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="flex-1 overflow-y-auto space-y-6 pt-4">
@@ -404,7 +404,7 @@ export default function Projects() {
                 <div className="grid grid-cols-3 gap-4">
                   <Card><CardContent className="py-4 text-center"><p className="text-2xl font-semibold">{selectedProject?.iteration_count ?? 0}</p><p className="text-xs text-muted-foreground">迭代</p></CardContent></Card>
                   <Card><CardContent className="py-4 text-center"><p className="text-2xl font-semibold">-</p><p className="text-xs text-muted-foreground">提交</p></CardContent></Card>
-                  <Card><CardContent className="py-4 text-center"><p className="text-2xl font-semibold">{selectedProject?.pending_sql_count ?? 0}</p><p className="text-xs text-muted-foreground">待执行 SQL</p></CardContent></Card>
+                  <Card><CardContent className="py-4 text-center"><p className="text-2xl font-semibold">{selectedProject?.pending_sql_count ?? 0}</p><p className="text-xs text-muted-foreground">待执行事项</p></CardContent></Card>
                 </div>
               </div>
             </TabsContent>
@@ -470,7 +470,7 @@ export default function Projects() {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">暂无 SQL</p>
+                <p className="text-sm text-muted-foreground">暂无执行事项</p>
               )}
             </TabsContent>
           </Tabs>

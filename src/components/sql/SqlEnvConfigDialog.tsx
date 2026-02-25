@@ -174,7 +174,7 @@ export default function SqlEnvConfigDialog({
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              SQL 执行环境配置{projectName ? ` - ${projectName}` : ''}
+              执行事项环境配置{projectName ? ` - ${projectName}` : ''}
             </DialogTitle>
           </DialogHeader>
 

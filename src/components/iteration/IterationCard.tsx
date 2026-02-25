@@ -166,7 +166,7 @@ export default function IterationCard({
           </StatPanel>
 
           <StatPanel
-            label="待执行 SQL"
+            label="待执行事项"
             icon={<Database className="h-4 w-4" />}
             className={cn(
               'bg-gradient-to-br',
@@ -183,7 +183,7 @@ export default function IterationCard({
                   {pendingSqlCount > 0 ? '待处理' : '空闲'}
                 </Badge>
               </div>
-              <p className="text-sm text-muted-foreground">SQL 脚本</p>
+              <p className="text-sm text-muted-foreground">执行事项</p>
             </div>
           </StatPanel>
 

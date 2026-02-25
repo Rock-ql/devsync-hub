@@ -189,7 +189,7 @@ export default function SqlManagement() {
     openConfirm(
       {
         title: '放弃未保存修改？',
-        description: '当前 SQL 编辑内容尚未保存，继续操作会丢失修改。',
+        description: '当前编辑内容尚未保存，继续操作会丢失修改。',
         confirmText: '放弃修改',
         cancelText: '继续编辑',
       },
@@ -224,8 +224,8 @@ export default function SqlManagement() {
     if (editingEnvItems.some((item) => item.executed)) {
       openConfirm(
         {
-          title: '确认更新 SQL？',
-          description: '该 SQL 已在部分环境执行，修改仅影响后续执行记录。',
+          title: '确认更新事项？',
+          description: '该事项已在部分环境执行，修改仅影响后续执行记录。',
           confirmText: '继续更新',
         },
         submitEdit,
@@ -279,9 +279,9 @@ export default function SqlManagement() {
     <div className="space-y-10">
       <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-4">
-          <SectionLabel>SQL HUB</SectionLabel>
+          <SectionLabel>TASK HUB</SectionLabel>
           <div>
-            <h1 className="text-3xl font-display">SQL 管理</h1>
+            <h1 className="text-3xl font-display">执行事项</h1>
             <p className="mt-2 text-sm text-muted-foreground">集中管理待执行脚本与投放状态</p>
           </div>
         </div>
@@ -293,7 +293,7 @@ export default function SqlManagement() {
           })
         }}>
           <Plus className="h-4 w-4" />
-          新增 SQL
+          新增事项
         </Button>
       </div>
 
@@ -412,10 +412,10 @@ export default function SqlManagement() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => store.getState().openPreview(sql)} aria-label="查看 SQL 详情">
+                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => store.getState().openPreview(sql)} aria-label="查看详情">
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => handleStartEdit(sql)} aria-label="编辑 SQL">
+                        <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => handleStartEdit(sql)} aria-label="编辑事项">
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button variant="secondary" size="sm" onClick={() => store.getState().openLinkDialog(sql.id)}>
@@ -431,14 +431,14 @@ export default function SqlManagement() {
                           onClick={() => {
                             openConfirm(
                               {
-                                title: '删除 SQL？',
-                                description: `确定删除 SQL「${sql.title}」吗？`,
+                                title: '删除执行事项？',
+                                description: `确定删除「${sql.title}」吗？`,
                                 confirmText: '删除',
                               },
                               () => deleteMutation.mutate(sql.id),
                             )
                           }}
-                          aria-label="删除 SQL"
+                          aria-label="删除事项"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -485,7 +485,7 @@ export default function SqlManagement() {
         ) : (
           <Card>
             <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              暂无 SQL 数据
+              暂无执行事项
             </CardContent>
           </Card>
         )}
@@ -526,7 +526,7 @@ export default function SqlManagement() {
       }}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{previewSql?.title || 'SQL 详情'}</DialogTitle>
+            <DialogTitle>{previewSql?.title || '事项详情'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2 text-sm text-muted-foreground">
             <p>
@@ -554,7 +554,7 @@ export default function SqlManagement() {
       <Dialog open={isModalOpen} onOpenChange={handleModalChange}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>新增 SQL</DialogTitle>
+            <DialogTitle>新增执行事项</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -611,7 +611,7 @@ export default function SqlManagement() {
               )}
             </div>
             <div className="space-y-2">
-              <Label>SQL 标题 *</Label>
+              <Label>事项标题 *</Label>
               <Input
                 value={formData.title}
                 onChange={(e) => store.getState().setFormData({ title: e.target.value })}
@@ -619,7 +619,7 @@ export default function SqlManagement() {
               />
             </div>
             <div className="space-y-2">
-              <Label>SQL 内容 *</Label>
+              <Label>事项内容 *</Label>
               <Textarea
                 value={formData.content}
                 onChange={(e) => store.getState().setFormData({ content: e.target.value })}
