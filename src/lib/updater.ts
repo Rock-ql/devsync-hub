@@ -1,5 +1,5 @@
 import { getVersion } from '@tauri-apps/api/app'
-import { isTauri } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 
 export interface AppUpdateCheckResult {
@@ -55,4 +55,13 @@ export async function installAppUpdate(
   onEvent?: (event: AppUpdateDownloadEvent) => void,
 ): Promise<void> {
   await update.downloadAndInstall(onEvent)
+}
+
+export async function restartApp(): Promise<void> {
+  if (!isTauri()) {
+    window.location.reload()
+    return
+  }
+
+  await invoke('restart_app')
 }

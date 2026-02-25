@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 use crate::AppState;
 use crate::error::AppResult;
 use crate::models::system_setting::*;
@@ -39,4 +39,9 @@ pub async fn list_api_keys(state: State<'_, AppState>) -> AppResult<Vec<ApiKey>>
 pub async fn delete_api_key(state: State<'_, AppState>, id: i32) -> AppResult<()> {
     let db = state.db.lock().await;
     setting_service::delete_api_key(&db.conn, id)
+}
+
+#[tauri::command]
+pub fn restart_app(handle: AppHandle) {
+    handle.restart();
 }

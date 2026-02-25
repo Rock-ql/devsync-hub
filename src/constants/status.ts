@@ -1,15 +1,25 @@
 /** 需求状态 */
 export const STATUS_LABEL: Record<string, string> = {
-  pending_dev: '待开发',
+  presented: '已宣讲',
+  pending_dev: '待研发',
   developing: '开发中',
+  integrating: '联调中',
+  pending_test: '待测试',
   testing: '测试中',
-  released: '已发布',
+  pending_acceptance: '待验收',
+  pending_release: '待上线',
+  released: '已上线',
 }
 
 export const STATUS_COLOR: Record<string, string> = {
-  pending_dev: 'bg-zinc-400',
+  presented: 'bg-zinc-400',
+  pending_dev: 'bg-slate-400',
   developing: 'bg-blue-500',
+  integrating: 'bg-cyan-500',
+  pending_test: 'bg-yellow-400',
   testing: 'bg-amber-500',
+  pending_acceptance: 'bg-orange-400',
+  pending_release: 'bg-violet-500',
   released: 'bg-emerald-500',
 }
 

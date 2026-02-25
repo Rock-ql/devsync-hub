@@ -85,6 +85,7 @@ pub fn run() {
             commands::setting_cmd::get_all_settings,
             commands::setting_cmd::update_setting,
             commands::setting_cmd::batch_update_settings,
+            commands::setting_cmd::restart_app,
             // ApiKey
             commands::setting_cmd::create_api_key,
             commands::setting_cmd::list_api_keys,

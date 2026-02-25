@@ -12,6 +12,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toaster'
 
+const STATUS_TONE: Record<string, 'neutral' | 'info' | 'warning' | 'success'> = {
+  presented: 'neutral',
+  pending_dev: 'neutral',
+  developing: 'info',
+  integrating: 'info',
+  pending_test: 'warning',
+  testing: 'warning',
+  pending_acceptance: 'warning',
+  pending_release: 'warning',
+  released: 'success',
+}
+
 interface ProjectOption {
   id: number
   name: string
@@ -199,7 +211,7 @@ export default function RequirementList({ iterationId, iterationName, projects }
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="soft" tone="neutral">{statusOptions.find((s) => s.code === item.status)?.desc || '已宣讲'}</Badge>
+                <Badge variant="soft" tone={STATUS_TONE[item.status ?? 'presented'] || 'neutral'}>{statusOptions.find((s) => s.code === item.status)?.desc || '已宣讲'}</Badge>
                 {item.environment && (
                   <Badge variant="soft" tone="warning">{item.environment}</Badge>
                 )}
