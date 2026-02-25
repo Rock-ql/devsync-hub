@@ -165,6 +165,23 @@ cd src-tauri && cargo run --bin report_verify -- <export_json> <start_date> <end
 
 ---
 
+## Git 提交规范
+
+每次完成任务后，必须执行 git 提交，提交信息需准确描述本次变更内容，格式如下：
+
+```
+<type>: <简洁描述>
+
+- 变更点1
+- 变更点2
+```
+
+type 取值：`feat`（新功能）、`fix`（修复）、`refactor`（重构）、`chore`（杂项）、`docs`（文档）
+
+**禁止使用** `chore: auto-commit by claude` 等无意义的提交信息，必须如实描述改动内容。
+
+---
+
 ## AI 使用指引
 
 ### 修改代码时注意
