@@ -882,7 +882,7 @@ fn is_merge_commit(message: &str) -> bool {
 }
 
 fn build_daily_template_reference(template: &str) -> String {
-    let default_reference = "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作\n2. 其他工作\n   1. 按项目分组列出";
+    let default_reference = "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作";
     if template.trim().is_empty() {
         return default_reference.to_string();
     }
@@ -912,10 +912,6 @@ fn build_daily_template_reference(template: &str) -> String {
 
     if !normalized.contains("需求编号") {
         normalized.push_str("\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作");
-    }
-
-    if !normalized.contains("其他工作") {
-        normalized.push_str("\n2. 其他工作\n   1. 按项目分组列出");
     }
 
     normalized
