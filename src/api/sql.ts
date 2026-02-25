@@ -60,7 +60,7 @@ export const sqlApi = {
     invoke<PageResult<PendingSqlDetail>>("list_sql", { req: params || {} }),
   detail: (id: number) =>
     invoke<PendingSqlDetail>("get_sql_detail", { id }),
-  add: (data: { project_id: number; iteration_id: number; title: string; content: string; execution_order?: number; remark?: string }) =>
+  add: (data: { project_id: number; iteration_id: number; title: string; content: string; execution_order?: number; remark?: string; requirement_id?: number }) =>
     invoke<number>("add_sql", { req: data }),
   update: (data: { id: number; title?: string; content?: string; execution_order?: number; remark?: string }) =>
     invoke<void>("update_sql", { req: data }),

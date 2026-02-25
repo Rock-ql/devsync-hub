@@ -87,6 +87,8 @@ pub struct PendingSqlAddReq {
     pub execution_order: Option<i32>,
     #[serde(default)]
     pub remark: Option<String>,
+    #[serde(default)]
+    pub requirement_id: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

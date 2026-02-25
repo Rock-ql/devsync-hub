@@ -1,7 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { PageResult } from '@/api'
 import { sqlApi, PendingSqlDetail } from '@/api/sql'
 import { projectApi, Project } from '@/api/project'
+import { iterationApi } from '@/api/iteration'
+import { requirementApi, RequirementItem } from '@/api/requirement'
 import { Eye, Plus, Trash2, Pencil } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,7 +15,7 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
@@ -29,6 +32,12 @@ const FIXED_ENV_OPTIONS = [
   { envCode: 'smoke', envName: 'smoke' },
   { envCode: 'prod', envName: 'prod' },
 ]
+
+interface RequirementGroup {
+  iterationId: number
+  iterationName: string
+  items: RequirementItem[]
+}
 
 export default function SqlManagement() {
   const queryClient = useQueryClient()
@@ -57,6 +66,47 @@ export default function SqlManagement() {
 
   useUnsavedWarning(hasUnsavedChanges)
 
+  // --- 需求分组（新增弹窗用）---
+  const [requirementGroups, setRequirementGroups] = useState<RequirementGroup[]>([])
+  const [isLoadingRequirements, setIsLoadingRequirements] = useState(false)
+
+  const { data: iterationPage } = useQuery<PageResult<{ id: number; name: string }>>({
+    queryKey: ['iterations-all'],
+    queryFn: () => iterationApi.list({ page: 1, size: 200 }),
+    enabled: isModalOpen,
+  })
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      setRequirementGroups([])
+      setIsLoadingRequirements(false)
+      return
+    }
+    const iterations = iterationPage?.records || []
+    if (!iterations.length) {
+      setRequirementGroups([])
+      return
+    }
+    let cancelled = false
+    setIsLoadingRequirements(true)
+    Promise.all(iterations.map((it) => requirementApi.list(it.id)))
+      .then((results) => {
+        if (cancelled) return
+        const groups = iterations
+          .map((it, idx) => ({
+            iterationId: it.id,
+            iterationName: it.name,
+            items: results[idx] || [],
+          }))
+          .filter((g) => g.items.length > 0)
+        setRequirementGroups(groups)
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingRequirements(false)
+      })
+    return () => { cancelled = true }
+  }, [isModalOpen, iterationPage])
+
   // --- React Query (服务端状态) ---
   const { data: sqlList, isLoading } = useQuery<PageResult<PendingSqlDetail>>({
     queryKey: ['pending-sql', selectedStatus, selectedProjectId],
@@ -80,9 +130,12 @@ export default function SqlManagement() {
       title: data.title,
       content: data.content,
       remark: data.remark || undefined,
+      requirement_id: data.requirementId ? parseInt(data.requirementId) : undefined,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
+      queryClient.invalidateQueries({ queryKey: ['requirements'] })
+      queryClient.invalidateQueries({ queryKey: ['iterations'] })
       store.getState().closeAddModal()
       store.getState().resetForm()
     },
@@ -529,6 +582,33 @@ export default function SqlManagement() {
                   placeholder="迭代 ID（可选）"
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>关联需求</Label>
+              {isLoadingRequirements ? (
+                <p className="text-sm text-muted-foreground py-2">正在加载需求...</p>
+              ) : requirementGroups.length ? (
+                <Select value={formData.requirementId || undefined} onValueChange={(value) => store.getState().setFormData({ requirementId: value === '__none__' ? '' : value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="请选择需求（可选）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">不关联需求</SelectItem>
+                    {requirementGroups.map((group) => (
+                      <SelectGroup key={group.iterationId}>
+                        <SelectLabel>{group.iterationName}</SelectLabel>
+                        {group.items.map((item) => (
+                          <SelectItem key={item.id} value={String(item.id)}>
+                            {item.requirement_code ? `${item.requirement_code} - ${item.name}` : item.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <p className="text-sm text-muted-foreground py-2">暂无可关联需求</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>SQL 标题 *</Label>

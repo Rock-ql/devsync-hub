@@ -105,7 +105,19 @@ pub fn add_sql(conn: &Connection, req: &PendingSqlAddReq) -> AppResult<i32> {
             req.remark.as_deref().unwrap_or("").trim(),
         ],
     )?;
-    Ok(conn.last_insert_rowid() as i32)
+    let new_id = conn.last_insert_rowid() as i32;
+
+    // 关联需求
+    if let Some(rid) = req.requirement_id {
+        if rid > 0 {
+            conn.execute(
+                "INSERT INTO work_item_link (work_item_id, link_type, link_id) VALUES (?, 'sql', ?)",
+                params![rid, new_id],
+            )?;
+        }
+    }
+
+    Ok(new_id)
 }
 
 pub fn update_sql(conn: &Connection, req: &PendingSqlUpdateReq) -> AppResult<()> {

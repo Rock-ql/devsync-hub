@@ -5,6 +5,7 @@ import { EnvExecutionItem } from '@/components/sql/EnvExecutionButtons'
 interface SqlFormData {
   projectId: string
   iterationId: string
+  requirementId: string
   title: string
   content: string
   remark: string
@@ -13,6 +14,7 @@ interface SqlFormData {
 const INITIAL_FORM: SqlFormData = {
   projectId: '',
   iterationId: '',
+  requirementId: '',
   title: '',
   content: '',
   remark: '',
