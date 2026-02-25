@@ -331,8 +331,16 @@ fn enrich_iteration(conn: &Connection, iter: Iteration) -> AppResult<IterationDe
     ).unwrap_or(0);
 
     let sql_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM pending_sql WHERE iteration_id = ? AND state = 1 AND deleted_at IS NULL AND status = 'pending'",
-        params![iter.id], |row| row.get(0),
+        "SELECT COUNT(DISTINCT ps.id) FROM pending_sql ps \
+         WHERE ps.state = 1 AND ps.deleted_at IS NULL \
+         AND (ps.iteration_id = ? \
+              OR ps.id IN ( \
+                SELECT wil.link_id FROM work_item_link wil \
+                INNER JOIN requirement r ON wil.work_item_id = r.id \
+                WHERE wil.link_type = 'sql' AND wil.state = 1 \
+                  AND r.iteration_id = ? AND r.state = 1 AND r.deleted_at IS NULL \
+              ))",
+        params![iter.id, iter.id], |row| row.get(0),
     ).unwrap_or(0);
 
     Ok(IterationDetailRsp {
