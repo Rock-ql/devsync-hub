@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { sqlApi, SqlEnvConfig } from '@/api/sql'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from '@/components/ui/toaster'
@@ -24,6 +26,7 @@ export default function SqlEnvConfigDialog({
   onChanged,
 }: SqlEnvConfigDialogProps) {
   const queryClient = useQueryClient()
+  const { dialogState, openConfirm, closeConfirm, handleConfirm } = useConfirmDialog()
   const [newEnvCode, setNewEnvCode] = useState('')
   const [newEnvName, setNewEnvName] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -154,14 +157,26 @@ export default function SqlEnvConfigDialog({
     addMutation.mutate()
   }
 
+  const requestDeleteEnv = (item: SqlEnvConfig) => {
+    openConfirm(
+      {
+        title: '删除执行环境？',
+        description: `确定删除环境 ${item.env_name}（${item.env_code}）吗？`,
+        confirmText: '删除',
+      },
+      () => deleteMutation.mutate(item.id),
+    )
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            SQL 执行环境配置{projectName ? ` - ${projectName}` : ''}
-          </DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              SQL 执行环境配置{projectName ? ` - ${projectName}` : ''}
+            </DialogTitle>
+          </DialogHeader>
 
         {isLoading ? (
           <p className="text-sm text-muted-foreground">加载中...</p>
@@ -239,10 +254,7 @@ export default function SqlEnvConfigDialog({
                       variant="ghost"
                       size="sm"
                       className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
-                      onClick={() => {
-                        if (!confirm(`确定删除环境 ${item.env_name} 吗？`)) return
-                        deleteMutation.mutate(item.id)
-                      }}
+                      onClick={() => requestDeleteEnv(item)}
                       aria-label="删除"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -291,12 +303,25 @@ export default function SqlEnvConfigDialog({
           </div>
         </div>
 
-        <DialogFooter className="pt-2">
-          <Button variant="secondary" type="button" onClick={() => onOpenChange(false)}>
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter className="pt-2">
+            <Button variant="secondary" type="button" onClick={() => onOpenChange(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={dialogState.open}
+        onOpenChange={(open) => {
+          if (!open) closeConfirm()
+        }}
+        title={dialogState.title}
+        description={dialogState.description}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        onConfirm={handleConfirm}
+      />
+    </>
   )
 }

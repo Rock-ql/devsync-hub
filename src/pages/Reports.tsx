@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { reportApi, ReportBrief } from '@/api/report'
 import { buildSettingMap, settingApi } from '@/api/setting'
@@ -26,9 +26,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import MarkdownEditor from '@/components/report/MarkdownEditor'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
 import { toast } from '@/components/ui/toaster'
@@ -112,7 +112,9 @@ export default function Reports() {
   const editForm = useReportStore((s) => s.editForm)
   const copySuccess = useReportStore((s) => s.copySuccess)
 
-  const { confirmLeave } = useUnsavedWarning(hasUnsavedChanges)
+  useUnsavedWarning(hasUnsavedChanges)
+  const [isDiscardDialogOpen, setIsDiscardDialogOpen] = useState(false)
+  const pendingDiscardActionRef = useRef<null | (() => void)>(null)
 
   // --- React Query ---
   const { data: settingsData } = useQuery({
@@ -245,9 +247,31 @@ export default function Reports() {
     store.getState().startEdit(selectedReport.title, selectedReport.content)
   }
 
+  const runWithDiscardConfirm = (action: () => void) => {
+    if (!(isEditing && hasUnsavedChanges)) {
+      action()
+      return
+    }
+    pendingDiscardActionRef.current = action
+    setIsDiscardDialogOpen(true)
+  }
+
+  const handleConfirmDiscard = () => {
+    const action = pendingDiscardActionRef.current
+    pendingDiscardActionRef.current = null
+    setIsDiscardDialogOpen(false)
+    action?.()
+  }
+
+  const handleKeepEditing = () => {
+    pendingDiscardActionRef.current = null
+    setIsDiscardDialogOpen(false)
+  }
+
   const handleCancelEdit = () => {
-    if (hasUnsavedChanges && !confirmLeave()) return
-    store.getState().cancelEdit()
+    runWithDiscardConfirm(() => {
+      store.getState().cancelEdit()
+    })
   }
 
   const handleSaveEdit = (e: React.FormEvent) => {
@@ -276,23 +300,29 @@ export default function Reports() {
 
   const handleSelectDate = (date: Date, isCurrentMonth: boolean) => {
     if (!isCurrentMonth) return
-    if (isEditing && !confirmLeave()) return
-    store.getState().cancelEdit()
-    store.getState().setPanelState({ mode: 'daily', date })
+    const action = () => {
+      store.getState().cancelEdit()
+      store.getState().setPanelState({ mode: 'daily', date })
+    }
+    runWithDiscardConfirm(action)
   }
 
   const handleSelectWeek = (week: WeekRow) => {
-    if (isEditing && !confirmLeave()) return
-    store.getState().cancelEdit()
-    store.getState().setPanelState({ mode: 'weekly', week })
+    const action = () => {
+      store.getState().cancelEdit()
+      store.getState().setPanelState({ mode: 'weekly', week })
+    }
+    runWithDiscardConfirm(action)
   }
 
   const handleMonthChange = (offset: number) => {
-    if (isEditing && !confirmLeave()) return
-    const next = addMonths(safeSelectedMonth, offset)
-    store.getState().setSelectedMonth(next)
-    store.getState().cancelEdit()
-    store.getState().setPanelState({ mode: 'daily', date: startOfMonth(next) })
+    const action = () => {
+      const next = addMonths(safeSelectedMonth, offset)
+      store.getState().setSelectedMonth(next)
+      store.getState().cancelEdit()
+      store.getState().setPanelState({ mode: 'daily', date: startOfMonth(next) })
+    }
+    runWithDiscardConfirm(action)
   }
 
   const openGenerateWithPanel = () => {
@@ -441,7 +471,13 @@ export default function Reports() {
                         <span>{selectedReport.created_at?.split('T')[0]}</span>
                       </div>
                     </div>
-                    <Textarea value={editForm.content} onChange={(e) => store.getState().setEditForm({ content: e.target.value })} rows={15} className="font-mono text-sm" required />
+                    <MarkdownEditor
+                      value={editForm.content}
+                      onChange={(content) => store.getState().setEditForm({ content })}
+                      required
+                      components={MARKDOWN_COMPONENTS}
+                      normalizeContent={normalizeReportMarkdown}
+                    />
                     <div className="flex items-center gap-2">
                       <Button type="submit" disabled={updateMutation.isPending}>{updateMutation.isPending ? '保存中...' : '保存'}</Button>
                       <Button type="button" variant="secondary" onClick={handleCancelEdit}>取消</Button>
@@ -524,6 +560,29 @@ export default function Reports() {
               <Button type="submit" disabled={generateMutation.isPending}>{generateMutation.isPending ? '生成中...' : '生成'}</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isDiscardDialogOpen}
+        onOpenChange={(open) => {
+          setIsDiscardDialogOpen(open)
+          if (!open) pendingDiscardActionRef.current = null
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>放弃未保存的修改？</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">当前内容尚未保存，继续操作会丢失本次编辑内容。</p>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={handleKeepEditing}>
+              继续编辑
+            </Button>
+            <Button type="button" onClick={handleConfirmDiscard}>
+              放弃修改
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

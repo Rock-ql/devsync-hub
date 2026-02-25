@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
@@ -17,12 +18,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useProjectStore, DetailTab } from '@/stores/useProjectStore'
 import { ITER_STATUS_LABEL, ITER_STATUS_TONE, SQL_STATUS_LABEL } from '@/constants/status'
 
 export default function Projects() {
   const queryClient = useQueryClient()
   const store = useProjectStore
+  const { dialogState, openConfirm, closeConfirm, handleConfirm } = useConfirmDialog()
 
   // --- Zustand store (selector 精确订阅) ---
   const isModalOpen = useProjectStore((s) => s.isModalOpen)
@@ -189,6 +192,17 @@ export default function Projects() {
     if (!open) store.getState().closeDetail()
   }
 
+  const requestDeleteProject = (project: Project) => {
+    openConfirm(
+      {
+        title: '删除项目？',
+        description: `确认删除项目「${project.name}」吗？该操作不可撤销。`,
+        confirmText: '删除',
+      },
+      () => deleteMutation.mutate(project.id),
+    )
+  }
+
   const formatCommitDate = (dateStr: string) => {
     const date = new Date(dateStr)
     return date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -253,7 +267,7 @@ export default function Projects() {
                     variant="ghost"
                     size="sm"
                     className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
-                    onClick={() => { if (confirm('确定要删除此项目吗？')) deleteMutation.mutate(project.id) }}
+                    onClick={() => requestDeleteProject(project)}
                     aria-label="删除项目"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -462,6 +476,18 @@ export default function Projects() {
           </Tabs>
         </SheetContent>
       </Sheet>
+
+      <ConfirmDialog
+        open={dialogState.open}
+        onOpenChange={(open) => {
+          if (!open) closeConfirm()
+        }}
+        title={dialogState.title}
+        description={dialogState.description}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        onConfirm={handleConfirm}
+      />
     </div>
   )
 }

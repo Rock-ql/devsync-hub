@@ -1,0 +1,47 @@
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+
+interface ConfirmDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  description?: string
+  confirmText?: string
+  cancelText?: string
+  onConfirm: () => void
+}
+
+export default function ConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmText = '确认',
+  cancelText = '取消',
+  onConfirm,
+}: ConfirmDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {description ? <DialogDescription>{description}</DialogDescription> : null}
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+            {cancelText}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              onConfirm()
+              onOpenChange(false)
+            }}
+          >
+            {confirmText}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

@@ -5,11 +5,13 @@ import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download, RefreshC
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useUpdateStore } from '@/stores/update'
 import { useShallow } from 'zustand/react/shallow'
 
@@ -24,6 +26,7 @@ const SETTING_KEYS = {
 
 export default function Settings() {
   const queryClient = useQueryClient()
+  const { dialogState, openConfirm, closeConfirm, handleConfirm } = useConfirmDialog()
   const [activeTab, setActiveTab] = useState('general')
   const [showApiKey, setShowApiKey] = useState(false)
   const [showGitlabToken, setShowGitlabToken] = useState(false)
@@ -161,6 +164,17 @@ export default function Settings() {
     totalBytes && totalBytes > 0
       ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
       : null
+
+  const requestDeleteApiKey = (id: number, name: string) => {
+    openConfirm(
+      {
+        title: '删除 API Key？',
+        description: `确认删除「${name}」吗？删除后调用方将立即失效。`,
+        confirmText: '删除',
+      },
+      () => deleteKeyMutation.mutate(id),
+    )
+  }
 
   return (
     <div className="space-y-10">
@@ -446,11 +460,7 @@ export default function Settings() {
                           variant="ghost"
                           size="sm"
                           className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
-                          onClick={() => {
-                            if (confirm('确定要删除此 API Key 吗？')) {
-                              deleteKeyMutation.mutate(key.id)
-                            }
-                          }}
+                          onClick={() => requestDeleteApiKey(key.id, key.name)}
                           aria-label="删除 API Key"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -594,6 +604,18 @@ export default function Settings() {
         </TabsContent>
 
       </Tabs>
+
+      <ConfirmDialog
+        open={dialogState.open}
+        onOpenChange={(open) => {
+          if (!open) closeConfirm()
+        }}
+        title={dialogState.title}
+        description={dialogState.description}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        onConfirm={handleConfirm}
+      />
     </div>
   )
 }

@@ -6,7 +6,9 @@ import { Eye, Plus, Trash2, Pencil } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
@@ -51,8 +53,9 @@ export default function SqlManagement() {
   const formData = useSqlStore((s) => s.formData)
 
   const store = useSqlStore
+  const { dialogState, openConfirm, closeConfirm, handleConfirm } = useConfirmDialog()
 
-  const { confirmLeave } = useUnsavedWarning(hasUnsavedChanges)
+  useUnsavedWarning(hasUnsavedChanges)
 
   // --- React Query (服务端状态) ---
   const { data: sqlList, isLoading } = useQuery<PageResult<PendingSqlDetail>>({
@@ -125,29 +128,58 @@ export default function SqlManagement() {
     addMutation.mutate(formData)
   }
 
+  const runWithUnsavedGuard = (action: () => void) => {
+    if (!(editingId && hasUnsavedChanges)) {
+      action()
+      return
+    }
+    openConfirm(
+      {
+        title: '放弃未保存修改？',
+        description: '当前 SQL 编辑内容尚未保存，继续操作会丢失修改。',
+        confirmText: '放弃修改',
+        cancelText: '继续编辑',
+      },
+      action,
+    )
+  }
+
   const handleStartEdit = (sql: PendingSqlDetail) => {
-    if (editingId && editingId !== sql.id && !confirmLeave()) return
+    if (editingId && editingId !== sql.id) {
+      runWithUnsavedGuard(() => store.getState().startEdit(sql))
+      return
+    }
     store.getState().startEdit(sql)
   }
 
   const handleCancelEdit = () => {
-    if (hasUnsavedChanges && !confirmLeave()) return
-    store.getState().cancelEdit()
+    runWithUnsavedGuard(() => store.getState().cancelEdit())
   }
 
   const handleSaveEdit = () => {
     if (!editingId) return
+    const submitEdit = () => {
+      updateMutation.mutate({
+        id: editingId,
+        title: editForm.title,
+        content: editForm.content,
+        remark: editForm.remark,
+      })
+    }
     const editingSql = sqlList?.records.find((item) => item.id === editingId)
     const editingEnvItems = buildEnvItems(editingSql)
     if (editingEnvItems.some((item) => item.executed)) {
-      if (!confirm('该SQL已在部分环境执行，修改不影响已有执行记录，是否继续？')) return
+      openConfirm(
+        {
+          title: '确认更新 SQL？',
+          description: '该 SQL 已在部分环境执行，修改仅影响后续执行记录。',
+          confirmText: '继续更新',
+        },
+        submitEdit,
+      )
+      return
     }
-    updateMutation.mutate({
-      id: editingId,
-      title: editForm.title,
-      content: editForm.content,
-      remark: editForm.remark,
-    })
+    submitEdit()
   }
 
   const buildEnvItems = (sql?: PendingSqlDetail | null): EnvExecutionItem[] => {
@@ -201,10 +233,11 @@ export default function SqlManagement() {
           </div>
         </div>
         <Button onClick={() => {
-          if (editingId && hasUnsavedChanges && !confirmLeave()) return
-          store.getState().clearEdit()
-          store.getState().resetForm()
-          store.getState().openAddModal()
+          runWithUnsavedGuard(() => {
+            store.getState().clearEdit()
+            store.getState().resetForm()
+            store.getState().openAddModal()
+          })
         }}>
           <Plus className="h-4 w-4" />
           新增 SQL
@@ -343,7 +376,14 @@ export default function SqlManagement() {
                           size="sm"
                           className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
                           onClick={() => {
-                            if (confirm('确定要删除此 SQL 吗？')) deleteMutation.mutate(sql.id)
+                            openConfirm(
+                              {
+                                title: '删除 SQL？',
+                                description: `确定删除 SQL「${sql.title}」吗？`,
+                                confirmText: '删除',
+                              },
+                              () => deleteMutation.mutate(sql.id),
+                            )
                           }}
                           aria-label="删除 SQL"
                         >
@@ -527,6 +567,18 @@ export default function SqlManagement() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={dialogState.open}
+        onOpenChange={(open) => {
+          if (!open) closeConfirm()
+        }}
+        title={dialogState.title}
+        description={dialogState.description}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        onConfirm={handleConfirm}
+      />
     </div>
   )
 }

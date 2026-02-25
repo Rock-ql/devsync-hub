@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Textarea } from '@/components/ui/textarea'
+import ConfirmDialog from '@/components/common/ConfirmDialog'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import IterationCard from '@/components/iteration/IterationCard'
 import { toast } from '@/components/ui/toaster'
 
@@ -19,6 +21,7 @@ export default function Iterations() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingIteration, setEditingIteration] = useState<IterationDetail | null>(null)
   const [expandedIterations, setExpandedIterations] = useState<number[]>([])
+  const { dialogState, openConfirm, closeConfirm, handleConfirm } = useConfirmDialog()
   const [formData, setFormData] = useState({
     project_ids: [] as number[],
     name: '',
@@ -116,11 +119,16 @@ export default function Iterations() {
     setIsModalOpen(true)
   }
 
-  const confirmDeleteIteration = (iteration: IterationDetail) => {
+  const requestDeleteIteration = (iteration: IterationDetail) => {
     const requirementCount = iteration.requirement_count ?? 0
     const sqlCount = iteration.pending_sql_count ?? 0
-    return confirm(
-      `删除迭代「${iteration.name}」将级联删除 ${requirementCount} 条需求及 ${sqlCount} 条 SQL（含执行记录），是否继续？`
+    openConfirm(
+      {
+        title: '删除迭代？',
+        description: `删除「${iteration.name}」将级联删除 ${requirementCount} 条需求及 ${sqlCount} 条 SQL（含执行记录）。`,
+        confirmText: '删除',
+      },
+      () => deleteMutation.mutate(iteration.id),
     )
   }
 
@@ -196,11 +204,7 @@ export default function Iterations() {
               onToggleRequirements={() => toggleRequirement(iteration.id)}
               onStatusChange={(status) => statusMutation.mutate({ id: iteration.id, status })}
               onEdit={() => handleEdit(iteration)}
-              onDelete={() => {
-                if (confirmDeleteIteration(iteration)) {
-                  deleteMutation.mutate(iteration.id)
-                }
-              }}
+              onDelete={() => requestDeleteIteration(iteration)}
             />
           ))
         ) : (
@@ -295,6 +299,18 @@ export default function Iterations() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={dialogState.open}
+        onOpenChange={(open) => {
+          if (!open) closeConfirm()
+        }}
+        title={dialogState.title}
+        description={dialogState.description}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        onConfirm={handleConfirm}
+      />
     </div>
   )
 }
