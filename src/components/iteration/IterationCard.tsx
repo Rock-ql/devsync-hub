@@ -127,7 +127,7 @@ export default function IterationCard({
       </div>
 
       <div className="border-t border-border/60 bg-gradient-to-r from-muted/30 via-background to-muted/20 p-5">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <StatPanel
             label="状态"
             icon={<CircleDot className="h-4 w-4" />}
