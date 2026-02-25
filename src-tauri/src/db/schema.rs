@@ -198,6 +198,18 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             deleted_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS requirement_status_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            requirement_id INTEGER NOT NULL DEFAULT 0,
+            from_status TEXT NOT NULL DEFAULT '',
+            to_status TEXT NOT NULL DEFAULT '',
+            changed_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            state INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            deleted_at TEXT
+        );
     ")?;
 
     // 清理 git_commit 重复数据并建立唯一索引（按 commit SHA 去重，不区分分支）
@@ -233,6 +245,8 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
         CREATE INDEX IF NOT EXISTS idx_work_item_link_work_item_id ON work_item_link(work_item_id);
         CREATE INDEX IF NOT EXISTS idx_work_item_link_link_type_link_id ON work_item_link(link_type, link_id);
         CREATE INDEX IF NOT EXISTS idx_sql_execution_log_sql_id ON sql_execution_log(sql_id);
+        CREATE INDEX IF NOT EXISTS idx_req_status_log_requirement_id ON requirement_status_log(requirement_id);
+        CREATE INDEX IF NOT EXISTS idx_req_status_log_changed_at ON requirement_status_log(changed_at);
     ")?;
 
     Ok(())

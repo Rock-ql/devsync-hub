@@ -121,7 +121,7 @@ pub fn generate_report_prepare(conn: &Connection, req: &ReportGenerateReq) -> Ap
         match query_commits(conn, req) {
             Ok(commits) => {
                 let project_commits = build_project_commits(&commits);
-                let structured_input = match build_daily_summary_by_requirement(conn, &commits) {
+                let structured_input = match build_daily_summary_by_requirement(conn, &commits, &req.start_date) {
                     Ok(text) => text,
                     Err(err) => {
                         log::warn!("[报告生成] 构建日报结构化输入失败，回退到Git提交: {}", err);
@@ -245,7 +245,7 @@ fn build_project_commits(commits: &[CommitInfo]) -> HashMap<String, Vec<String>>
     result
 }
 
-fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo]) -> AppResult<String> {
+fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo], date: &str) -> AppResult<String> {
     let display_commits: Vec<CommitInfo> = commits
         .iter()
         .filter(|commit| !is_merge_commit(&commit.message))
@@ -255,14 +255,21 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
     log::info!("[日报生成] 总提交数: {}, 过滤merge后: {}", commits.len(), display_commits.len());
 
     if display_commits.is_empty() {
-        return Ok("暂无提交记录".to_string());
+        let mut output = String::new();
+        append_status_changes(&mut output, conn, date, &HashSet::new());
+        if output.trim().is_empty() {
+            return Ok("暂无提交记录".to_string());
+        }
+        return Ok(output.trim().to_string());
     }
 
     let requirements = load_active_requirements(conn)?;
     log::info!("[日报生成] 活跃需求数: {}", requirements.len());
     if requirements.is_empty() {
         log::warn!("[日报生成] 无活跃需求，回退到按项目分组");
-        return Ok(render_daily_other_work_only(&display_commits));
+        let mut output = render_daily_other_work_only(&display_commits);
+        append_status_changes(&mut output, conn, date, &HashSet::new());
+        return Ok(output.trim().to_string());
     }
 
     let coded_requirements: Vec<CodedRequirement> = requirements
@@ -283,7 +290,9 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
     }
     if coded_requirements.is_empty() {
         log::warn!("[日报生成] 所有需求均无编号，回退到按项目分组");
-        return Ok(render_daily_other_work_only(&display_commits));
+        let mut output = render_daily_other_work_only(&display_commits);
+        append_status_changes(&mut output, conn, date, &HashSet::new());
+        return Ok(output.trim().to_string());
     }
 
     let requirement_ids: Vec<i32> = coded_requirements.iter().map(|item| item.requirement.id).collect();
@@ -363,7 +372,9 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
 
     if requirement_commits.is_empty() {
         log::warn!("[日报生成] 无提交匹配到需求，回退到按项目分组");
-        return Ok(render_daily_other_work_only(&display_commits));
+        let mut output = render_daily_other_work_only(&display_commits);
+        append_status_changes(&mut output, conn, date, &HashSet::new());
+        return Ok(output.trim().to_string());
     }
 
     let mut output = String::from("## 需求工作:\n");
@@ -399,13 +410,20 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo])
     }
 
     if !has_requirement_content {
-        return Ok(render_daily_other_work_only(&display_commits));
+        let mut output = render_daily_other_work_only(&display_commits);
+        append_status_changes(&mut output, conn, date, &HashSet::new());
+        return Ok(output.trim().to_string());
     }
 
     if !other_commits.is_empty() {
         output.push_str("## 其他工作:\n");
         append_other_work_by_project(&mut output, &other_commits);
     }
+
+    // 注入当日正向状态变更（排除已有提交覆盖的需求）
+    let shown_requirement_ids: HashSet<i32> = requirement_commits.keys().cloned().collect();
+    append_status_changes(&mut output, conn, date, &shown_requirement_ids);
+
     Ok(output.trim().to_string())
 }
 
@@ -747,6 +765,140 @@ fn parse_commit_time(time_text: &str) -> Option<DateTime<FixedOffset>> {
     }
 
     None
+}
+
+fn status_order(status: &str) -> i32 {
+    match status {
+        "presented" => 0,
+        "pending_dev" => 1,
+        "developing" => 2,
+        "integrating" => 3,
+        "pending_test" => 4,
+        "testing" => 5,
+        "pending_acceptance" => 6,
+        "pending_release" => 7,
+        "released" => 8,
+        _ => -1,
+    }
+}
+
+fn is_forward_transition(from: &str, to: &str) -> bool {
+    status_order(to) > status_order(from)
+}
+
+fn status_change_action_text(to: &str) -> String {
+    match to {
+        "released" => "完成上线".to_string(),
+        "pending_release" => "完成验收，等待上线".to_string(),
+        "pending_acceptance" => "完成测试，待验收".to_string(),
+        "testing" => "提测".to_string(),
+        "pending_test" => "完成联调，提交测试".to_string(),
+        "integrating" => "完成开发，进入联调".to_string(),
+        "developing" => "开始开发".to_string(),
+        _ => format!("状态更新为 {}", format_requirement_status(to)),
+    }
+}
+
+struct StatusChangeEntry {
+    requirement_name: String,
+    project_names: String,
+    to_status: String,
+}
+
+fn load_forward_status_changes(conn: &Connection, date: &str, exclude_ids: &HashSet<i32>) -> Vec<StatusChangeEntry> {
+    // 查询当日所有状态变更，按 requirement_id 分组取最终状态（id 最大的记录）
+    let sql = r#"
+        SELECT rsl.requirement_id, rsl.from_status, rsl.to_status,
+               r.name AS req_name,
+               COALESCE(GROUP_CONCAT(DISTINCT p.name), '') AS project_names
+        FROM requirement_status_log rsl
+        INNER JOIN requirement r ON rsl.requirement_id = r.id AND r.state = 1 AND r.deleted_at IS NULL
+        LEFT JOIN requirement_project rp ON rp.requirement_id = r.id AND rp.state = 1 AND rp.deleted_at IS NULL
+        LEFT JOIN project p ON p.id = rp.project_id AND p.state = 1 AND p.deleted_at IS NULL
+        WHERE rsl.state = 1 AND rsl.deleted_at IS NULL
+          AND SUBSTR(rsl.changed_at, 1, 10) = ?
+        GROUP BY rsl.id
+        ORDER BY rsl.id ASC
+    "#;
+
+    let mut stmt = match conn.prepare(sql) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[日报生成] 查询状态变更日志失败: {}", e);
+            return Vec::new();
+        }
+    };
+
+    struct RawChange {
+        requirement_id: i32,
+        from_status: String,
+        to_status: String,
+        requirement_name: String,
+        project_names: String,
+    }
+
+    let rows: Vec<RawChange> = match stmt.query_map(params![date], |row| {
+        Ok(RawChange {
+            requirement_id: row.get(0)?,
+            from_status: row.get(1)?,
+            to_status: row.get(2)?,
+            requirement_name: row.get(3)?,
+            project_names: row.get(4)?,
+        })
+    }) {
+        Ok(mapped) => mapped.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            log::warn!("[日报生成] 查询状态变更记录失败: {}", e);
+            return Vec::new();
+        }
+    };
+
+    // 对同一需求取最终的正向变更（to_status 序号最大的）
+    let mut best: HashMap<i32, RawChange> = HashMap::new();
+    for change in rows {
+        if !is_forward_transition(&change.from_status, &change.to_status) {
+            continue;
+        }
+        if exclude_ids.contains(&change.requirement_id) {
+            continue;
+        }
+        let replace = match best.get(&change.requirement_id) {
+            Some(existing) => status_order(&change.to_status) > status_order(&existing.to_status),
+            None => true,
+        };
+        if replace {
+            best.insert(change.requirement_id, change);
+        }
+    }
+
+    let mut result: Vec<StatusChangeEntry> = best.into_values()
+        .map(|c| StatusChangeEntry {
+            requirement_name: c.requirement_name,
+            project_names: c.project_names,
+            to_status: c.to_status,
+        })
+        .collect();
+    result.sort_by(|a, b| a.requirement_name.cmp(&b.requirement_name));
+    result
+}
+
+fn append_status_changes(output: &mut String, conn: &Connection, date: &str, shown_requirement_ids: &HashSet<i32>) {
+    let changes = load_forward_status_changes(conn, date, shown_requirement_ids);
+    if changes.is_empty() {
+        return;
+    }
+
+    log::info!("[日报生成] 当日正向状态变更数: {}", changes.len());
+    output.push_str("\n## 状态变更:\n");
+    for entry in &changes {
+        let action = status_change_action_text(&entry.to_status);
+        let project_display = if entry.project_names.is_empty() {
+            String::new()
+        } else {
+            format!("【{}】", entry.project_names.replace(',', "/"))
+        };
+        output.push_str(&format!("- {}{} {}\n", project_display, entry.requirement_name, action));
+    }
 }
 
 fn render_daily_other_work_only(commits: &[CommitInfo]) -> String {

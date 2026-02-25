@@ -282,10 +282,27 @@ pub fn update_requirement(conn: &Connection, req: &RequirementUpdateReq) -> AppR
 }
 
 pub fn update_status(conn: &Connection, req: &RequirementStatusUpdateReq) -> AppResult<()> {
+    // 查询旧状态用于记录变更日志
+    let old_status: String = conn.query_row(
+        "SELECT status FROM requirement WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+        params![req.id],
+        |row| row.get(0),
+    ).map_err(|_| AppError::NotFound("需求不存在".into()))?;
+
     conn.execute(
         "UPDATE requirement SET status = ?, updated_at = datetime('now','localtime') WHERE id = ? AND state = 1",
         params![req.status, req.id],
     )?;
+
+    // 写入状态变更日志
+    if old_status != req.status {
+        conn.execute(
+            "INSERT INTO requirement_status_log (requirement_id, from_status, to_status, changed_at) VALUES (?, ?, ?, datetime('now','localtime'))",
+            params![req.id, old_status, req.status],
+        )?;
+        log::info!("[需求状态变更] id={}, {} -> {}", req.id, old_status, req.status);
+    }
+
     Ok(())
 }
 
