@@ -11,6 +11,7 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useUpdateStore } from '@/stores/update'
+import { useShallow } from 'zustand/react/shallow'
 
 const SETTING_KEYS = {
   DEEPSEEK_API_KEY: 'deepseek.api.key',
@@ -45,22 +46,24 @@ export default function Settings() {
     checkForUpdates,
     installUpdate,
     setDialogOpen: setUpdateDialogOpen,
-  } = useUpdateStore((state) => ({
-    currentVersion: state.currentVersion,
-    latestVersion: state.latestVersion,
-    releaseDate: state.releaseDate,
-    changelog: state.changelog,
-    statusMessage: state.statusMessage,
-    hasPendingUpdate: state.hasPendingUpdate,
-    isChecking: state.isChecking,
-    isInstalling: state.isInstalling,
-    isRestartReady: state.isRestartReady,
-    downloadedBytes: state.downloadedBytes,
-    totalBytes: state.totalBytes,
-    checkForUpdates: state.checkForUpdates,
-    installUpdate: state.installUpdate,
-    setDialogOpen: state.setDialogOpen,
-  }))
+  } = useUpdateStore(
+    useShallow((state) => ({
+      currentVersion: state.currentVersion,
+      latestVersion: state.latestVersion,
+      releaseDate: state.releaseDate,
+      changelog: state.changelog,
+      statusMessage: state.statusMessage,
+      hasPendingUpdate: state.hasPendingUpdate,
+      isChecking: state.isChecking,
+      isInstalling: state.isInstalling,
+      isRestartReady: state.isRestartReady,
+      downloadedBytes: state.downloadedBytes,
+      totalBytes: state.totalBytes,
+      checkForUpdates: state.checkForUpdates,
+      installUpdate: state.installUpdate,
+      setDialogOpen: state.setDialogOpen,
+    })),
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
