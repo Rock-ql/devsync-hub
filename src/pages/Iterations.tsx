@@ -1,41 +1,18 @@
-import { Fragment, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { PageResult } from '@/api'
 import { iterationApi, IterationDetail } from '@/api/iteration'
 import { projectApi, Project } from '@/api/project'
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import RequirementList from '@/components/requirement/RequirementList'
+import IterationCard from '@/components/iteration/IterationCard'
 import { toast } from '@/components/ui/toaster'
-
-const statusStyles: Record<string, string> = {
-  planning: 'bg-slate-100 text-slate-700 border-slate-200',
-  developing: 'bg-sky-100 text-sky-700 border-sky-200',
-  testing: 'bg-amber-100 text-amber-700 border-amber-200',
-  released: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-}
-
-const statusTones: Record<string, 'neutral' | 'info' | 'warning' | 'success'> = {
-  planning: 'neutral',
-  developing: 'info',
-  testing: 'warning',
-  released: 'success',
-}
-
-const statusLabels: Record<string, string> = {
-  planning: '规划中',
-  developing: '开发中',
-  testing: '测试中',
-  released: '已上线',
-}
 
 export default function Iterations() {
   const queryClient = useQueryClient()
@@ -139,17 +116,6 @@ export default function Iterations() {
     setIsModalOpen(true)
   }
 
-  const displayIterationProjects = (iteration: IterationDetail) => {
-    const names = iteration.project_names?.length
-      ? iteration.project_names
-      : []
-
-    if (!names.length) return '未关联项目'
-    const visible = names.slice(0, 3)
-    const extra = names.length - visible.length
-    return extra > 0 ? `${visible.join(', ')} +${extra}` : visible.join(', ')
-  }
-
   const confirmDeleteIteration = (iteration: IterationDetail) => {
     const requirementCount = iteration.requirement_count ?? 0
     const sqlCount = iteration.pending_sql_count ?? 0
@@ -200,7 +166,7 @@ export default function Iterations() {
   }
 
   if (isLoading) {
-    return <div className="text-center py-12 text-muted-foreground">加载中...</div>
+    return <div className="py-12 text-center text-muted-foreground">加载中...</div>
   }
 
   return (
@@ -219,220 +185,23 @@ export default function Iterations() {
         </Button>
       </div>
 
-      <Card className="hidden overflow-hidden lg:block">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-muted/60">
-              <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-6 py-4">迭代名称</th>
-                <th className="px-6 py-4">所属项目</th>
-                <th className="px-6 py-4">状态</th>
-                <th className="px-6 py-4">时间范围</th>
-                <th className="px-6 py-4">待执行 SQL</th>
-                <th className="px-6 py-4">关联需求</th>
-                <th className="px-6 py-4 text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {iterations?.records?.length ? (
-                iterations.records.map((iteration) => {
-                  const isExpanded = expandedIterations.includes(iteration.id)
-                  return (
-                    <Fragment key={iteration.id}>
-                      <tr className="hover:bg-muted/40">
-                        <td className="px-6 py-4 text-sm font-medium text-foreground">
-                          {iteration.name}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-muted-foreground">
-                          {displayIterationProjects(iteration)}
-                        </td>
-                        <td className="px-6 py-4">
-                          <Select
-                            value={iteration.status}
-                            onValueChange={(value) => statusMutation.mutate({ id: iteration.id, status: value })}
-                          >
-                            <SelectTrigger size="md" className={statusStyles[iteration.status]}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="planning">规划中</SelectItem>
-                              <SelectItem value="developing">开发中</SelectItem>
-                              <SelectItem value="testing">测试中</SelectItem>
-                              <SelectItem value="released">已上线</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-muted-foreground">
-                          {iteration.start_date && iteration.end_date
-                            ? `${iteration.start_date} ~ ${iteration.end_date}`
-                            : '-'}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          {iteration.pending_sql_count > 0 ? (
-                            <Badge tone="warning" variant="soft">
-                              {iteration.pending_sql_count} 条
-                            </Badge>
-                          ) : (
-                            <Badge tone="success" variant="soft">
-                              0
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 gap-1 px-2 text-xs"
-                            onClick={() => toggleRequirement(iteration.id)}
-                          >
-                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                            {iteration.requirement_count || 0} 条
-                          </Button>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 w-9 p-0"
-                            onClick={() => handleEdit(iteration)}
-                            aria-label="编辑迭代"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
-                            onClick={() => {
-                              if (confirmDeleteIteration(iteration)) {
-                                deleteMutation.mutate(iteration.id)
-                              }
-                            }}
-                            aria-label="删除迭代"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </td>
-                      </tr>
-                      {isExpanded ? (
-                        <tr>
-                          <td colSpan={7} className="px-6 pb-6 pt-2 bg-muted/20">
-                            <RequirementList
-                              iterationId={iteration.id}
-                              iterationName={iteration.name}
-                              projects={projects || []}
-                            />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  )
-                })
-              ) : (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-10 text-center text-sm text-muted-foreground"
-                  >
-                    暂无迭代，请先新增迭代
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      <div className="grid gap-4 lg:hidden">
+      <div className="space-y-4">
         {iterations?.records?.length ? (
           iterations.records.map((iteration) => (
-            <Card key={iteration.id}>
-              <CardHeader className="space-y-2">
-                <CardTitle className="text-base">{iteration.name}</CardTitle>
-                <p className="text-sm text-muted-foreground">{displayIterationProjects(iteration)}</p>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  <Badge tone={statusTones[iteration.status] || 'neutral'} variant="soft">
-                    {statusLabels[iteration.status] || iteration.status}
-                  </Badge>
-                  {iteration.pending_sql_count > 0 ? (
-                    <Badge tone="warning" variant="soft">
-                      {iteration.pending_sql_count} 条 SQL
-                    </Badge>
-                  ) : (
-                    <Badge tone="success" variant="soft">
-                      SQL 清零
-                    </Badge>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 gap-1 px-2 text-xs"
-                    onClick={() => toggleRequirement(iteration.id)}
-                  >
-                    {expandedIterations.includes(iteration.id)
-                      ? <ChevronDown className="h-4 w-4" />
-                      : <ChevronRight className="h-4 w-4" />}
-                    需求 {iteration.requirement_count || 0} 条
-                  </Button>
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {iteration.start_date && iteration.end_date
-                    ? `${iteration.start_date} ~ ${iteration.end_date}`
-                    : '未设置时间'}
-                </div>
-                <div className="flex items-center justify-between">
-                  <Select
-                    value={iteration.status}
-                    onValueChange={(value) => statusMutation.mutate({ id: iteration.id, status: value })}
-                  >
-                    <SelectTrigger size="md" className={statusStyles[iteration.status]}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="planning">规划中</SelectItem>
-                      <SelectItem value="developing">开发中</SelectItem>
-                      <SelectItem value="testing">测试中</SelectItem>
-                      <SelectItem value="released">已上线</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-9 w-9 p-0"
-                      onClick={() => handleEdit(iteration)}
-                      aria-label="编辑迭代"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
-                      onClick={() => {
-                        if (confirmDeleteIteration(iteration)) {
-                          deleteMutation.mutate(iteration.id)
-                        }
-                      }}
-                      aria-label="删除迭代"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                {expandedIterations.includes(iteration.id) ? (
-                  <div className="rounded-xl border border-border/60 bg-muted/40 p-4">
-                    <RequirementList
-                      iterationId={iteration.id}
-                      iterationName={iteration.name}
-                      projects={projects || []}
-                    />
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
+            <IterationCard
+              key={iteration.id}
+              iteration={iteration}
+              projects={projects || []}
+              isExpanded={expandedIterations.includes(iteration.id)}
+              onToggleRequirements={() => toggleRequirement(iteration.id)}
+              onStatusChange={(status) => statusMutation.mutate({ id: iteration.id, status })}
+              onEdit={() => handleEdit(iteration)}
+              onDelete={() => {
+                if (confirmDeleteIteration(iteration)) {
+                  deleteMutation.mutate(iteration.id)
+                }
+              }}
+            />
           ))
         ) : (
           <Card>

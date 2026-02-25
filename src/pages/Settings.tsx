@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { buildSettingMap, settingApi, type ImportResult } from '@/api/setting'
 import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download, RefreshCw } from 'lucide-react'
@@ -10,12 +10,7 @@ import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  checkForAppUpdate,
-  getCurrentAppVersion,
-  installAppUpdate,
-  type AppUpdateHandle,
-} from '@/lib/updater'
+import { useUpdateStore } from '@/stores/update'
 
 const SETTING_KEYS = {
   DEEPSEEK_API_KEY: 'deepseek.api.key',
@@ -35,16 +30,37 @@ export default function Settings() {
   const [newKeyValue, setNewKeyValue] = useState('')
   const [copied, setCopied] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
-  const [appVersion, setAppVersion] = useState('-')
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
-  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false)
-  const [updateHandle, setUpdateHandle] = useState<AppUpdateHandle | null>(null)
-  const [updateLatestVersion, setUpdateLatestVersion] = useState('')
-  const [updateReleaseDate, setUpdateReleaseDate] = useState('')
-  const [updateBody, setUpdateBody] = useState('')
-  const [updateStatus, setUpdateStatus] = useState('尚未检查更新')
-  const [downloadedBytes, setDownloadedBytes] = useState(0)
-  const [totalBytes, setTotalBytes] = useState<number | null>(null)
+  const {
+    currentVersion,
+    latestVersion,
+    releaseDate,
+    changelog,
+    statusMessage,
+    hasPendingUpdate,
+    isChecking,
+    isInstalling,
+    isRestartReady,
+    downloadedBytes,
+    totalBytes,
+    checkForUpdates,
+    installUpdate,
+    setDialogOpen: setUpdateDialogOpen,
+  } = useUpdateStore((state) => ({
+    currentVersion: state.currentVersion,
+    latestVersion: state.latestVersion,
+    releaseDate: state.releaseDate,
+    changelog: state.changelog,
+    statusMessage: state.statusMessage,
+    hasPendingUpdate: state.hasPendingUpdate,
+    isChecking: state.isChecking,
+    isInstalling: state.isInstalling,
+    isRestartReady: state.isRestartReady,
+    downloadedBytes: state.downloadedBytes,
+    totalBytes: state.totalBytes,
+    checkForUpdates: state.checkForUpdates,
+    installUpdate: state.installUpdate,
+    setDialogOpen: state.setDialogOpen,
+  }))
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
@@ -136,93 +152,6 @@ export default function Settings() {
     }
     reader.readAsText(file)
     e.target.value = ''
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    void getCurrentAppVersion()
-      .then((version) => {
-        if (!cancelled) {
-          setAppVersion(version)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAppVersion('-')
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const handleCheckAppUpdate = async () => {
-    setIsCheckingUpdate(true)
-    setUpdateStatus('正在检查更新...')
-    setDownloadedBytes(0)
-    setTotalBytes(null)
-
-    try {
-      const result = await checkForAppUpdate()
-      setAppVersion(result.currentVersion)
-
-      if (!result.available || !result.update || !result.latestVersion) {
-        setUpdateHandle(null)
-        setUpdateLatestVersion('')
-        setUpdateReleaseDate('')
-        setUpdateBody('')
-        setUpdateStatus('当前已是最新版本')
-        return
-      }
-
-      setUpdateHandle(result.update)
-      setUpdateLatestVersion(result.latestVersion)
-      setUpdateReleaseDate(result.date || '')
-      setUpdateBody(result.body || '')
-      setUpdateStatus(`发现新版本 ${result.latestVersion}`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setUpdateStatus(`检查失败：${message}`)
-    } finally {
-      setIsCheckingUpdate(false)
-    }
-  }
-
-  const handleInstallAppUpdate = async () => {
-    if (!updateHandle || isInstallingUpdate) return
-
-    setIsInstallingUpdate(true)
-    setUpdateStatus('正在下载更新...')
-    setDownloadedBytes(0)
-    setTotalBytes(null)
-
-    try {
-      await installAppUpdate(updateHandle, (event) => {
-        if (event.event === 'Started') {
-          setTotalBytes(event.data.contentLength ?? null)
-          setDownloadedBytes(0)
-          setUpdateStatus('开始下载更新包...')
-          return
-        }
-
-        if (event.event === 'Progress') {
-          setDownloadedBytes((prev) => prev + event.data.chunkLength)
-          setUpdateStatus('正在下载更新包...')
-          return
-        }
-
-        setUpdateStatus('下载完成，正在安装...')
-      })
-
-      setUpdateHandle(null)
-      setUpdateStatus('更新安装完成，请重启应用以应用新版本')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setUpdateStatus(`安装失败：${message}`)
-    } finally {
-      setIsInstallingUpdate(false)
-    }
   }
 
   const progressPercent =
@@ -366,12 +295,15 @@ export default function Settings() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center gap-3 text-sm">
-                <Badge variant="soft" tone="neutral">当前版本 {appVersion}</Badge>
-                {updateLatestVersion ? (
-                  <Badge variant="soft" tone="info">可更新至 {updateLatestVersion}</Badge>
+                <Badge variant="soft" tone="neutral">当前版本 {currentVersion}</Badge>
+                {latestVersion && hasPendingUpdate ? (
+                  <Badge variant="soft" tone="info">可更新至 {latestVersion}</Badge>
                 ) : null}
-                {updateReleaseDate ? (
-                  <Badge variant="soft" tone="neutral">发布时间 {updateReleaseDate.split('T')[0]}</Badge>
+                {releaseDate ? (
+                  <Badge variant="soft" tone="neutral">发布时间 {releaseDate.split('T')[0]}</Badge>
+                ) : null}
+                {isRestartReady ? (
+                  <Badge variant="soft" tone="warning">等待重启</Badge>
                 ) : null}
               </div>
 
@@ -379,23 +311,34 @@ export default function Settings() {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={handleCheckAppUpdate}
-                  disabled={isCheckingUpdate || isInstallingUpdate}
+                  onClick={() => checkForUpdates()}
+                  disabled={isChecking || isInstalling}
                 >
                   <RefreshCw className="h-4 w-4" />
-                  {isCheckingUpdate ? '检查中...' : '检查更新'}
+                  {isChecking ? '检查中...' : '检查更新'}
                 </Button>
 
                 <Button
                   type="button"
-                  onClick={handleInstallAppUpdate}
-                  disabled={!updateHandle || isCheckingUpdate || isInstallingUpdate}
+                  onClick={() => installUpdate()}
+                  disabled={!hasPendingUpdate || isChecking || isInstalling || isRestartReady}
                 >
-                  {isInstallingUpdate ? '更新中...' : '立即更新'}
+                  {isInstalling ? '更新中...' : hasPendingUpdate ? '立即更新' : '等待新版本'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setUpdateDialogOpen(true)}
+                >
+                  查看更新详情
                 </Button>
               </div>
 
-              <p className="text-sm text-muted-foreground">{updateStatus}</p>
+              <p className="text-sm text-muted-foreground">
+                {statusMessage}
+                {hasPendingUpdate ? ' · 也可点击左上角 GitHub 图标快速处理' : ''}
+              </p>
 
               {progressPercent !== null ? (
                 <div className="space-y-2">
@@ -411,11 +354,11 @@ export default function Settings() {
                 </div>
               ) : null}
 
-              {updateBody ? (
+              {changelog && !isRestartReady ? (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground">更新说明</p>
                   <pre className="max-h-40 overflow-auto rounded-xl border border-border/60 bg-muted/60 p-3 text-xs text-foreground whitespace-pre-wrap">
-                    {updateBody}
+                    {changelog}
                   </pre>
                 </div>
               ) : null}

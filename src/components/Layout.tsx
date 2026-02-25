@@ -11,11 +11,15 @@ import {
   Moon,
   Sun,
   X,
+  Github,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSSE } from '@/hooks/useSSE'
-import { checkForAppUpdate } from '@/lib/updater'
 import { toast } from '@/components/ui/toaster'
+import { useUpdateStore } from '@/stores/update'
+import { UpdateDialog } from '@/components/update/UpdateDialog'
+
+const GITHUB_REPO_URL = 'https://github.com/Rock-ql/devsync-hub'
 
 const navigation = [
   { name: '仪表盘', href: '/', icon: LayoutDashboard },
@@ -26,9 +30,40 @@ const navigation = [
   { name: '系统设置', href: '/settings', icon: Settings },
 ]
 
+type GithubRepoButtonProps = {
+  className?: string
+  hasPendingUpdate: boolean
+  onClick: () => void
+}
+
+function GithubRepoButton({ className, hasPendingUpdate, onClick }: GithubRepoButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={hasPendingUpdate ? '查看可用更新' : '打开 GitHub 仓库'}
+      className={cn(
+        'relative rounded-lg border border-border p-2 text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background',
+        className,
+      )}
+    >
+      <Github className="h-5 w-5" />
+      {hasPendingUpdate ? (
+        <span className="absolute -right-1 -top-1 rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-4 text-white shadow">
+          NEW
+        </span>
+      ) : null}
+    </button>
+  )
+}
+
 export default function Layout() {
   const location = useLocation()
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
+  const hasPendingUpdate = useUpdateStore((state) => state.hasPendingUpdate)
+  const setUpdateDialogOpen = useUpdateStore((state) => state.setDialogOpen)
+  const checkForUpdates = useUpdateStore((state) => state.checkForUpdates)
+  const loadCurrentVersion = useUpdateStore((state) => state.loadCurrentVersion)
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try {
@@ -115,30 +150,30 @@ export default function Layout() {
   }, [])
 
   useEffect(() => {
-    let cancelled = false
+    let timer: number | null = null
+    void loadCurrentVersion()
+    void checkForUpdates({ silent: true })
 
-    const runAutoCheck = async () => {
-      try {
-        const result = await checkForAppUpdate()
-        if (cancelled || !result.available || !result.latestVersion) return
-        toast({
-          title: '发现新版本',
-          description: `检测到 ${result.latestVersion}，请前往系统设置执行在线更新。`,
-          duration: 6000,
-        })
-      } catch (error) {
-        if (!cancelled) {
-          console.warn('自动检查更新失败:', error)
-        }
-      }
+    if (typeof window !== 'undefined') {
+      timer = window.setInterval(() => {
+        void checkForUpdates({ silent: true })
+      }, 30 * 60 * 1000)
     }
-
-    void runAutoCheck()
 
     return () => {
-      cancelled = true
+      if (timer) {
+        window.clearInterval(timer)
+      }
     }
-  }, [])
+  }, [checkForUpdates, loadCurrentVersion])
+
+  const handleGithubClick = () => {
+    if (hasPendingUpdate) {
+      setUpdateDialogOpen(true)
+      return
+    }
+    window.open(GITHUB_REPO_URL, '_blank', 'noopener,noreferrer')
+  }
 
   const renderNavigation = (onNavigate?: () => void) => (
     <nav className="space-y-1">
@@ -180,6 +215,11 @@ export default function Layout() {
           <div className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-[hsl(var(--accent))] to-[hsl(var(--accent-secondary))] shadow-accent" />
             <span className="text-base font-semibold">DevSync Hub</span>
+            <GithubRepoButton
+              className="border-none"
+              hasPendingUpdate={hasPendingUpdate}
+              onClick={handleGithubClick}
+            />
           </div>
           <button
             type="button"
@@ -201,6 +241,7 @@ export default function Layout() {
               <p className="text-base font-semibold">DevSync Hub</p>
               <p className="text-xs text-muted-foreground">进度协同中枢</p>
             </div>
+            <GithubRepoButton hasPendingUpdate={hasPendingUpdate} onClick={handleGithubClick} />
           </div>
 
           <button
@@ -234,6 +275,11 @@ export default function Layout() {
               <div className="flex items-center gap-3">
                 <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-[hsl(var(--accent))] to-[hsl(var(--accent-secondary))] shadow-accent" />
                 <span className="text-base font-semibold">DevSync Hub</span>
+                <GithubRepoButton
+                  className="border-none"
+                  hasPendingUpdate={hasPendingUpdate}
+                  onClick={handleGithubClick}
+                />
               </div>
               <button
                 type="button"
@@ -250,6 +296,7 @@ export default function Layout() {
           </div>
         </div>
       )}
+      <UpdateDialog />
     </div>
   )
 }
