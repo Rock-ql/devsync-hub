@@ -750,7 +750,7 @@ fn parse_commit_time(time_text: &str) -> Option<DateTime<FixedOffset>> {
 }
 
 fn render_daily_other_work_only(commits: &[CommitInfo]) -> String {
-    let mut output = String::from("## 其他工作:\n");
+    let mut output = String::new();
     append_other_work_by_project(&mut output, commits);
     output.trim().to_string()
 }
