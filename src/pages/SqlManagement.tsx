@@ -134,7 +134,7 @@ export default function SqlManagement() {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
-      queryClient.invalidateQueries({ queryKey: ['requirements'] })
+      queryClient.invalidateQueries({ queryKey: ['requirements-page'] })
       queryClient.invalidateQueries({ queryKey: ['iterations'] })
       store.getState().closeAddModal()
       store.getState().resetForm()
@@ -548,6 +548,8 @@ export default function SqlManagement() {
         sqlId={linkSqlId || undefined}
         onLinked={() => {
           queryClient.invalidateQueries({ queryKey: ['pending-sql'] })
+          queryClient.invalidateQueries({ queryKey: ['requirements-page'] })
+          queryClient.invalidateQueries({ queryKey: ['iterations'] })
         }}
       />
 
