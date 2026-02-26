@@ -590,6 +590,11 @@ fn match_requirement(
     log::debug!("[日报匹配] commit.id={} project_id={} project_matched_ids={:?}",
         commit.id, commit.project_id, project_matched_ids);
 
+    // 策略4仅对需求相关分支生效，避免 bug/chore 等分支被按项目误归类
+    if !is_requirement_related_branch(&commit.branch) {
+        return None;
+    }
+
     if project_matched_ids.len() == 1 {
         project_matched_ids.first().copied()
     } else {
@@ -633,6 +638,12 @@ fn assign_unmatched_commits_by_nearest_anchor(
     let mut still_unmatched: Vec<CommitInfo> = Vec::new();
 
     for commit in unmatched_commits {
+        // 仅对需求相关分支尝试“邻近锚点”归属，避免误把杂项提交归入需求
+        if !is_requirement_related_branch(&commit.branch) {
+            still_unmatched.push(commit);
+            continue;
+        }
+
         let Some(commit_time) = parse_commit_time(&commit.committed_at) else {
             still_unmatched.push(commit);
             continue;
@@ -648,7 +659,10 @@ fn assign_unmatched_commits_by_nearest_anchor(
 
         for anchor in anchors {
             let minutes = (commit_time - anchor.committed_at).num_minutes().abs();
-            if anchor.committed_at.date_naive() == commit_time.date_naive() && minutes < nearest_minutes {
+            if anchor.committed_at.date_naive() == commit_time.date_naive()
+                && minutes <= NEAREST_ANCHOR_MAX_MINUTES
+                && minutes < nearest_minutes
+            {
                 nearest_minutes = minutes;
                 nearest_requirement_id = Some(anchor.requirement_id);
             }
@@ -738,6 +752,25 @@ fn parse_branch_candidates(branch_text: &str) -> HashSet<String> {
     }
 
     result
+}
+
+fn is_requirement_related_branch(branch_text: &str) -> bool {
+    let candidates = parse_branch_candidates(branch_text);
+    if candidates.is_empty() {
+        return false;
+    }
+
+    for candidate in candidates {
+        if extract_requirement_code_from_text(&candidate).is_empty() {
+            if candidate.starts_with("feature/") || candidate.starts_with("feat/") {
+                return true;
+            }
+            continue;
+        }
+        return true;
+    }
+
+    false
 }
 
 fn parse_commit_time(time_text: &str) -> Option<DateTime<FixedOffset>> {
