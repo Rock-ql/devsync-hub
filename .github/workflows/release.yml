@@ -15,7 +15,50 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      body: ${{ steps.notes.outputs.body }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -z "${{ inputs.tag }}" ]]; then
+            echo "workflow_dispatch 必须传入 tag 输入参数"
+            exit 1
+          fi
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -n 1)
+          if [ -z "$PREV_TAG" ]; then
+            LOGS=$(git log --pretty=format:"- %s" HEAD)
+          else
+            LOGS=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD")
+          fi
+          LOGS=$(echo "$LOGS" | grep -v "chore(release): bump version")
+          BODY="## 更新内容
+
+${LOGS}"
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -35,20 +78,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Resolve release tag
-        id: meta
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -z "${{ inputs.tag }}" ]]; then
-            echo "workflow_dispatch 必须传入 tag 输入参数"
-            exit 1
-          fi
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -81,9 +110,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ steps.meta.outputs.tag }}
-          releaseName: 'DevSync Hub ${{ steps.meta.outputs.tag }}'
-          releaseBody: ''
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: 'DevSync Hub ${{ needs.prepare.outputs.tag }}'
+          releaseBody: ${{ needs.prepare.outputs.body }}
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
