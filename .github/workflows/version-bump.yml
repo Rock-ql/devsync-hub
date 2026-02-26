@@ -34,6 +34,7 @@ jobs:
         run: node scripts/bump-version.mjs
 
       - name: Commit and push version files
+        id: commit
         env:
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
         run: |
@@ -41,12 +42,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
           if git diff --staged --quiet; then
-            echo "No version changes to commit"
-            exit 0
+            echo "版本号未变化，跳过提交，直接检查 tag"
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore(release): bump version to v${NEW_VERSION} [skip ci]"
+            git tag "v${NEW_VERSION}"
+            git push origin HEAD:main --follow-tags
+            echo "skipped=false" >> "$GITHUB_OUTPUT"
           fi
-          git commit -m "chore(release): bump version to v${NEW_VERSION} [skip ci]"
-          git tag "v${NEW_VERSION}"
-          git push origin HEAD:main --follow-tags
+          # 无论是否提交，确保 tag 存在
+          if ! git ls-remote --tags origin "refs/tags/v${NEW_VERSION}" | grep -q .; then
+            git tag "v${NEW_VERSION}" 2>/dev/null || true
+            git push origin "v${NEW_VERSION}"
+          fi
 
       - name: Trigger release workflow
         uses: actions/github-script@v7
