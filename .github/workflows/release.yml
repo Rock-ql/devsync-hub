@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
-      body: ${{ steps.notes.outputs.body }}
 
     steps:
       - uses: actions/checkout@v4
@@ -50,12 +49,15 @@ jobs:
             LOGS=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD")
           fi
           LOGS=$(echo "$LOGS" | grep -v "chore(release): bump version")
-          BODY="## 更新内容
+          printf "## 更新内容\n\n%s\n" "$LOGS" > release-notes.md
+          cat release-notes.md
 
-${LOGS}"
-          echo "body<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$BODY" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 1
 
   build:
     needs: prepare
@@ -78,6 +80,11 @@ ${LOGS}"
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -112,7 +119,7 @@ ${LOGS}"
         with:
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseName: 'DevSync Hub ${{ needs.prepare.outputs.tag }}'
-          releaseBody: ${{ needs.prepare.outputs.body }}
+          releaseBodyPath: release-notes.md
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
