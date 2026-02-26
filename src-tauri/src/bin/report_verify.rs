@@ -56,6 +56,7 @@ fn main() {
         start_date: start_date.to_string(),
         end_date: end_date.to_string(),
         force: false,
+        append_existing: false,
         author_email,
         project_ids: None,
     };
@@ -74,4 +75,3 @@ fn main() {
     println!("==== template_reference ====");
     println!("{}", ctx.template);
 }
-

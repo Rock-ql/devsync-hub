@@ -43,6 +43,8 @@ pub struct ReportGenerateReq {
     #[serde(default)]
     pub force: bool,
     #[serde(default)]
+    pub append_existing: bool,
+    #[serde(default)]
     pub author_email: Option<String>,
     #[serde(default)]
     pub project_ids: Option<Vec<i32>>,

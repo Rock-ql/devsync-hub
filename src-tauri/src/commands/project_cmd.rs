@@ -27,6 +27,151 @@ fn emit_project_sync(payload: &ProjectSyncSsePayload) {
     sse::publish("project_sync", &data);
 }
 
+fn emit_project_sync_if_enabled(enabled: bool, payload: &ProjectSyncSsePayload) {
+    if enabled {
+        emit_project_sync(payload);
+    }
+}
+
+pub(crate) async fn sync_project_commits_internal(state: &AppState, id: i32, emit_events: bool) -> AppResult<i32> {
+    let mut project_name = format!("#{}", id);
+
+    emit_project_sync_if_enabled(
+        emit_events,
+        &ProjectSyncSsePayload {
+            project_id: id,
+            project_name: project_name.clone(),
+            stage: "prepare".into(),
+            message: "准备同步提交...".into(),
+            percent: 0,
+            status: "running".into(),
+            added_count: None,
+        },
+    );
+
+    // Phase 1: Read project info from DB (sync)
+    let (gitlab_url, token, gitlab_project_id, gitlab_branch, name) = {
+        let db = state.db.lock().await;
+        project_service::sync_commits_prepare(&db.conn, id).map_err(|e| {
+            emit_project_sync_if_enabled(
+                emit_events,
+                &ProjectSyncSsePayload {
+                    project_id: id,
+                    project_name: project_name.clone(),
+                    stage: "error".into(),
+                    message: format!("同步准备失败：{}", e),
+                    percent: 100,
+                    status: "error".into(),
+                    added_count: None,
+                },
+            );
+            e
+        })?
+    }; // DB lock dropped here
+
+    project_name = name;
+
+    emit_project_sync_if_enabled(
+        emit_events,
+        &ProjectSyncSsePayload {
+            project_id: id,
+            project_name: project_name.clone(),
+            stage: "fetch".into(),
+            message: "正在从 GitLab 拉取提交...".into(),
+            percent: 30,
+            status: "running".into(),
+            added_count: None,
+        },
+    );
+
+    // Phase 2: Fetch from GitLab (async, no DB lock held)
+    let client = GitLabClient::new(&gitlab_url, &token);
+    let branch = if gitlab_branch.trim().is_empty() { "main".to_string() } else { gitlab_branch };
+    let commits = client
+        .list_commits(gitlab_project_id, &branch, 100)
+        .await
+        .map_err(|e| {
+            emit_project_sync_if_enabled(
+                emit_events,
+                &ProjectSyncSsePayload {
+                    project_id: id,
+                    project_name: project_name.clone(),
+                    stage: "error".into(),
+                    message: format!("GitLab 拉取失败：{}", e),
+                    percent: 100,
+                    status: "error".into(),
+                    added_count: None,
+                },
+            );
+            e
+        })?;
+
+    let commit_shas: Vec<String> = commits.iter().map(|item| item.id.clone()).collect();
+
+    emit_project_sync_if_enabled(
+        emit_events,
+        &ProjectSyncSsePayload {
+            project_id: id,
+            project_name: project_name.clone(),
+            stage: "store".into(),
+            message: format!("已获取 {} 条提交，写入数据库...", commits.len()),
+            percent: 70,
+            status: "running".into(),
+            added_count: None,
+        },
+    );
+
+    let branch_commits = vec![(branch, commits)];
+
+    // Phase 3: Insert commits into DB (sync)
+    let db = state.db.lock().await;
+    let added_count = project_service::sync_commits_insert(&db.conn, id, &branch_commits).map_err(|e| {
+        emit_project_sync_if_enabled(
+            emit_events,
+            &ProjectSyncSsePayload {
+                project_id: id,
+                project_name: project_name.clone(),
+                stage: "error".into(),
+                message: format!("写入数据库失败：{}", e),
+                percent: 100,
+                status: "error".into(),
+                added_count: None,
+            },
+        );
+        e
+    })?;
+
+    emit_project_sync_if_enabled(
+        emit_events,
+        &ProjectSyncSsePayload {
+            project_id: id,
+            project_name: project_name.clone(),
+            stage: "link".into(),
+            message: "正在匹配需求并更新关联...".into(),
+            percent: 85,
+            status: "running".into(),
+            added_count: Some(added_count),
+        },
+    );
+
+    let linked_count = project_service::link_synced_commits_to_requirements(&db.conn, id, &commit_shas).unwrap_or(0);
+
+    emit_project_sync_if_enabled(
+        emit_events,
+        &ProjectSyncSsePayload {
+            project_id: id,
+            project_name: project_name.clone(),
+            stage: "done".into(),
+            message: format!("同步完成：新增 {} 条提交，关联 {} 条提交记录", added_count, linked_count),
+            percent: 100,
+            status: "done".into(),
+            added_count: Some(added_count),
+        },
+    );
+
+    Ok(added_count)
+}
+
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>, req: ProjectListReq) -> AppResult<PageResult<Project>> {
     let db = state.db.lock().await;
@@ -65,118 +210,7 @@ pub async fn delete_project(state: State<'_, AppState>, id: i32) -> AppResult<()
 
 #[tauri::command]
 pub async fn sync_commits(state: State<'_, AppState>, id: i32) -> AppResult<i32> {
-    let mut project_name = format!("#{}", id);
-
-    emit_project_sync(&ProjectSyncSsePayload {
-        project_id: id,
-        project_name: project_name.clone(),
-        stage: "prepare".into(),
-        message: "准备同步提交...".into(),
-        percent: 0,
-        status: "running".into(),
-        added_count: None,
-    });
-
-    // Phase 1: Read project info from DB (sync)
-    let (gitlab_url, token, gitlab_project_id, gitlab_branch, name) = {
-        let db = state.db.lock().await;
-        project_service::sync_commits_prepare(&db.conn, id).map_err(|e| {
-            emit_project_sync(&ProjectSyncSsePayload {
-                project_id: id,
-                project_name: project_name.clone(),
-                stage: "error".into(),
-                message: format!("同步准备失败：{}", e),
-                percent: 100,
-                status: "error".into(),
-                added_count: None,
-            });
-            e
-        })?
-    }; // DB lock dropped here
-
-    project_name = name;
-
-    emit_project_sync(&ProjectSyncSsePayload {
-        project_id: id,
-        project_name: project_name.clone(),
-        stage: "fetch".into(),
-        message: "正在从 GitLab 拉取提交...".into(),
-        percent: 30,
-        status: "running".into(),
-        added_count: None,
-    });
-
-    // Phase 2: Fetch from GitLab (async, no DB lock held)
-    let client = GitLabClient::new(&gitlab_url, &token);
-    let branch = if gitlab_branch.trim().is_empty() { "main".to_string() } else { gitlab_branch };
-    let commits = client
-        .list_commits(gitlab_project_id, &branch, 100)
-        .await
-        .map_err(|e| {
-            emit_project_sync(&ProjectSyncSsePayload {
-                project_id: id,
-                project_name: project_name.clone(),
-                stage: "error".into(),
-                message: format!("GitLab 拉取失败：{}", e),
-                percent: 100,
-                status: "error".into(),
-                added_count: None,
-            });
-            e
-        })?;
-
-    let commit_shas: Vec<String> = commits.iter().map(|item| item.id.clone()).collect();
-
-    emit_project_sync(&ProjectSyncSsePayload {
-        project_id: id,
-        project_name: project_name.clone(),
-        stage: "store".into(),
-        message: format!("已获取 {} 条提交，写入数据库...", commits.len()),
-        percent: 70,
-        status: "running".into(),
-        added_count: None,
-    });
-
-    let branch_commits = vec![(branch, commits)];
-
-    // Phase 3: Insert commits into DB (sync)
-    let db = state.db.lock().await;
-    let added_count = project_service::sync_commits_insert(&db.conn, id, &branch_commits).map_err(|e| {
-        emit_project_sync(&ProjectSyncSsePayload {
-            project_id: id,
-            project_name: project_name.clone(),
-            stage: "error".into(),
-            message: format!("写入数据库失败：{}", e),
-            percent: 100,
-            status: "error".into(),
-            added_count: None,
-        });
-        e
-    })?;
-
-    emit_project_sync(&ProjectSyncSsePayload {
-        project_id: id,
-        project_name: project_name.clone(),
-        stage: "link".into(),
-        message: "正在匹配需求并更新关联...".into(),
-        percent: 85,
-        status: "running".into(),
-        added_count: Some(added_count),
-    });
-
-    let linked_count = project_service::link_synced_commits_to_requirements(&db.conn, id, &commit_shas).unwrap_or(0);
-
-    emit_project_sync(&ProjectSyncSsePayload {
-        project_id: id,
-        project_name: project_name.clone(),
-        stage: "done".into(),
-        message: format!("同步完成：新增 {} 条提交，关联 {} 条提交记录", added_count, linked_count),
-        percent: 100,
-        status: "done".into(),
-        added_count: Some(added_count),
-    });
-
-    Ok(added_count)
+    sync_project_commits_internal(state.inner(), id, true).await
 }
 
 #[tauri::command]

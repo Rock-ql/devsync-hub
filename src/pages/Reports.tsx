@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { reportApi, ReportBrief } from '@/api/report'
 import { buildSettingMap, settingApi } from '@/api/setting'
@@ -31,6 +31,7 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { useUnsavedWarning } from '@/hooks/useUnsavedWarning'
+import { useSSE } from '@/hooks/useSSE'
 import { toast } from '@/components/ui/toaster'
 import { useReportStore, type WeekRow } from '@/stores/useReportStore'
 
@@ -97,6 +98,53 @@ function resolveWeekNumber(date: Date, monthStart: Date): number {
   return Math.max(1, diff + 1)
 }
 
+type ReportGenerateAction = 'generate' | 'update'
+
+interface ReportGenerateProgressState {
+  mode: ReportGenerateAction
+  reportType: string
+  startDate: string
+  endDate: string
+  stage: string
+  message: string
+  percent: number
+  status: 'running' | 'done' | 'error'
+}
+
+interface ReportGenerateProgressPayload {
+  mode: string
+  report_type: string
+  start_date: string
+  end_date: string
+  stage: string
+  message: string
+  percent: number
+  status: string
+}
+
+interface ReportGenerateRequest {
+  type: string
+  start_date: string
+  end_date: string
+  author_email?: string
+  force?: boolean
+  append_existing?: boolean
+}
+
+interface ReportGenerateMutationInput {
+  action: ReportGenerateAction
+  request: ReportGenerateRequest
+}
+
+function getErrorText(error: unknown): string {
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  return '操作失败，请稍后重试'
+}
+
 export default function Reports() {
   const queryClient = useQueryClient()
   const store = useReportStore
@@ -115,6 +163,18 @@ export default function Reports() {
   useUnsavedWarning(hasUnsavedChanges)
   const [isDiscardDialogOpen, setIsDiscardDialogOpen] = useState(false)
   const pendingDiscardActionRef = useRef<null | (() => void)>(null)
+  const [reportProgress, setReportProgress] = useState<ReportGenerateProgressState | null>(null)
+  const reportProgressTimerRef = useRef<number | null>(null)
+
+  const clearReportProgressLater = (delayMs = 1800) => {
+    if (reportProgressTimerRef.current) {
+      window.clearTimeout(reportProgressTimerRef.current)
+    }
+    reportProgressTimerRef.current = window.setTimeout(() => {
+      setReportProgress(null)
+      reportProgressTimerRef.current = null
+    }, delayMs)
+  }
 
   // --- React Query ---
   const { data: settingsData } = useQuery({
@@ -122,6 +182,14 @@ export default function Reports() {
     queryFn: () => settingApi.getAll(),
   })
   const settings = useMemo(() => buildSettingMap(settingsData), [settingsData])
+
+  useEffect(() => {
+    return () => {
+      if (reportProgressTimerRef.current) {
+        window.clearTimeout(reportProgressTimerRef.current)
+      }
+    }
+  }, [])
 
   const safeSelectedMonth = useMemo(() => toValidDate(selectedMonth, startOfMonth(safeToday)), [selectedMonth, safeToday])
   const monthStart = useMemo(() => startOfMonth(safeSelectedMonth), [safeSelectedMonth])
@@ -184,14 +252,27 @@ export default function Reports() {
 
   // --- Mutations ---
   const generateMutation = useMutation({
-    mutationFn: (data: typeof generateForm) => reportApi.generate({
-      type: data.type,
-      start_date: data.startDate,
-      end_date: data.endDate,
-      author_email: data.authorEmail || undefined,
-    }),
-    onSuccess: async (report) => {
-      store.getState().closeGenerateModal()
+    mutationFn: (input: ReportGenerateMutationInput) => reportApi.generate(input.request),
+    onMutate: ({ action, request }) => {
+      if (reportProgressTimerRef.current) {
+        window.clearTimeout(reportProgressTimerRef.current)
+        reportProgressTimerRef.current = null
+      }
+      setReportProgress({
+        mode: action,
+        reportType: request.type,
+        startDate: request.start_date,
+        endDate: request.end_date,
+        stage: 'start',
+        message: action === 'update' ? '开始更新日报...' : '开始生成报告...',
+        percent: 0,
+        status: 'running',
+      })
+    },
+    onSuccess: async (report, variables) => {
+      if (variables.action === 'generate') {
+        store.getState().closeGenerateModal()
+      }
       const parsedStart = parseISO(report.start_date)
       const sd = toValidDate(parsedStart, safeToday)
       if (!isValid(parsedStart)) toast.error('报告日期格式异常，已按当前日期展示')
@@ -209,6 +290,31 @@ export default function Reports() {
         queryClient.invalidateQueries({ queryKey: ['report-month-summary', monthKey] }),
         queryClient.invalidateQueries({ queryKey: ['report-detail', report.id] }),
       ])
+      setReportProgress((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          stage: 'done',
+          message: variables.action === 'update' ? '日报更新完成' : '报告生成完成',
+          percent: 100,
+          status: 'done',
+        }
+      })
+      clearReportProgressLater()
+    },
+    onError: (error, variables) => {
+      const errorText = getErrorText(error)
+      toast.error(variables.action === 'update' ? `更新日报失败：${errorText}` : `生成报告失败：${errorText}`)
+      setReportProgress((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          stage: 'error',
+          message: errorText,
+          percent: 100,
+          status: 'error',
+        }
+      })
     },
   })
 
@@ -231,8 +337,73 @@ export default function Reports() {
     },
   })
 
+  const buildProgressKey = (mode: string, reportType: string, startDate: string, endDate: string) =>
+    `${mode}|${reportType}|${startDate}|${endDate}`
+
+  useSSE({
+    events: ['report_generate'],
+    onMessage: (eventName, data) => {
+      if (eventName !== 'report_generate') return
+      let payload: ReportGenerateProgressPayload
+      try {
+        payload = JSON.parse(data) as ReportGenerateProgressPayload
+      } catch {
+        return
+      }
+
+      const status = payload.status === 'done' || payload.status === 'error' ? payload.status : 'running'
+      if (payload.mode !== 'generate' && payload.mode !== 'update') return
+
+      const nextKey = buildProgressKey(payload.mode, payload.report_type, payload.start_date, payload.end_date)
+      setReportProgress((prev) => {
+        if (!prev) return prev
+        const currentKey = buildProgressKey(prev.mode, prev.reportType, prev.startDate, prev.endDate)
+        if (currentKey !== nextKey) return prev
+        return {
+          ...prev,
+          stage: payload.stage || prev.stage,
+          message: payload.message || prev.message,
+          percent: Number.isFinite(payload.percent) ? Math.max(0, Math.min(100, payload.percent)) : prev.percent,
+          status,
+        }
+      })
+
+      if (status === 'done' || status === 'error') {
+        clearReportProgressLater(status === 'error' ? 2800 : 1800)
+      }
+    },
+  })
+
   // --- Handlers ---
-  const handleGenerate = (e: React.FormEvent) => { e.preventDefault(); generateMutation.mutate(generateForm) }
+  const handleGenerate = (e: React.FormEvent) => {
+    e.preventDefault()
+    generateMutation.mutate({
+      action: 'generate',
+      request: {
+        type: generateForm.type,
+        start_date: generateForm.startDate,
+        end_date: generateForm.endDate,
+        author_email: generateForm.authorEmail || undefined,
+      },
+    })
+  }
+
+  const handleUpdateDaily = () => {
+    if (panelState.mode !== 'daily' || !selectedReport || selectedReport.type !== 'daily') return
+    const dateValue = formatSafeDate(panelState.date, 'yyyy-MM-dd', formatSafeDate(safeToday, 'yyyy-MM-dd', ''))
+    const savedEmail = settings?.['git.author.email'] || ''
+    generateMutation.mutate({
+      action: 'update',
+      request: {
+        type: 'daily',
+        start_date: dateValue,
+        end_date: dateValue,
+        author_email: savedEmail || undefined,
+        force: true,
+        append_existing: true,
+      },
+    })
+  }
 
   const handleDeleteReport = () => {
     if (!selectedReport || deleteMutation.isPending) return
@@ -348,6 +519,15 @@ export default function Reports() {
     ? `${formatSafeDate(panelState.date, 'yyyy年M月d日', '')} 暂无日报`
     : `第${panelState.week.weekNumber}周 周报 (${formatSafeDate(panelState.week.weekStart, 'yyyy-MM-dd', '')} ~ ${formatSafeDate(panelState.week.weekEnd, 'yyyy-MM-dd', '')})`
   const emptyStateButton = panelState.mode === 'daily' ? '生成日报' : '生成周报'
+  const isDailyPanel = panelState.mode === 'daily'
+  const hasDailyReport = isDailyPanel && selectedReport?.type === 'daily'
+  const isGenerating = generateMutation.isPending
+  const progressPercent = reportProgress ? Math.max(0, Math.min(100, Math.round(reportProgress.percent))) : null
+  const progressTone = reportProgress?.status === 'error'
+    ? 'bg-red-500'
+    : reportProgress?.status === 'done'
+      ? 'bg-emerald-500'
+      : 'bg-[hsl(var(--accent))]'
   const reportDateText = selectedReport
     ? selectedReport.start_date === selectedReport.end_date ? selectedReport.start_date : `${selectedReport.start_date} ~ ${selectedReport.end_date}`
     : ''
@@ -367,16 +547,39 @@ export default function Reports() {
           <div className="rounded-full bg-muted px-4 py-2 text-xs text-muted-foreground">
             本月统计: 日报 {dailyCompleted}/{dailyTotal} 周报 {weeklyCompleted}/{weeklyTotal}
           </div>
-          <Button onClick={() => {
-            const savedEmail = settings?.['git.author.email'] || ''
-            store.getState().setGenerateForm({ authorEmail: savedEmail })
-            store.getState().openGenerateModal()
-          }}>
-            <Sparkles className="h-4 w-4" />
-            生成报告
-          </Button>
+          {hasDailyReport ? (
+            <Button onClick={handleUpdateDaily} disabled={isGenerating}>
+              <Sparkles className="h-4 w-4" />
+              {isGenerating && reportProgress?.mode === 'update' ? '更新中...' : '更新日报'}
+            </Button>
+          ) : (
+            <Button onClick={openGenerateWithPanel} disabled={isGenerating}>
+              <Sparkles className="h-4 w-4" />
+              {isGenerating ? '生成中...' : isDailyPanel ? '生成日报' : '生成报告'}
+            </Button>
+          )}
         </div>
       </div>
+
+      {reportProgress && progressPercent !== null ? (
+        <Card>
+          <CardContent className="space-y-2 p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium text-foreground">
+                {reportProgress.mode === 'update' ? '更新日报进度' : '生成报告进度'}
+              </span>
+              <span className="text-muted-foreground">{progressPercent}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn('h-full transition-all', progressTone)}
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">{reportProgress.message}</p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[2fr_3fr]">
         <Card className="h-full">
@@ -518,7 +721,9 @@ export default function Reports() {
                   <div className="text-base text-foreground">{emptyStateTitle}</div>
                   <div className="mt-2">暂无报告，请点击生成。</div>
                 </div>
-                <Button onClick={openGenerateWithPanel}>{emptyStateButton}</Button>
+                <Button onClick={openGenerateWithPanel} disabled={isGenerating}>
+                  {isGenerating ? '处理中...' : emptyStateButton}
+                </Button>
               </div>
             )}
           </CardContent>
@@ -555,6 +760,20 @@ export default function Reports() {
               <Label>作者邮箱（可选）</Label>
               <Input type="email" value={generateForm.authorEmail} onChange={(e) => store.getState().setGenerateForm({ authorEmail: e.target.value })} placeholder="留空则使用全局设置" />
             </div>
+            {reportProgress && reportProgress.mode === 'generate' && progressPercent !== null ? (
+              <div className="space-y-2 rounded-lg border border-border/60 bg-muted/40 p-3">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{reportProgress.message}</span>
+                  <span>{progressPercent}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn('h-full transition-all', progressTone)}
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
             <DialogFooter>
               <Button type="button" variant="secondary" onClick={() => store.getState().closeGenerateModal()}>取消</Button>
               <Button type="submit" disabled={generateMutation.isPending}>{generateMutation.isPending ? '生成中...' : '生成'}</Button>

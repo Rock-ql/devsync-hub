@@ -3,7 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::report::*;
 use crate::models::common::PageResult;
 use crate::models::requirement::Requirement;
-use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
+use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone};
 use std::collections::{HashMap, HashSet};
 
 const NEAREST_ANCHOR_MAX_MINUTES: i64 = 30;
@@ -1337,6 +1337,19 @@ pub fn find_existing_report(conn: &Connection, req: &ReportGenerateReq) -> AppRe
 
 pub fn generate_report_upsert(conn: &Connection, req: &ReportGenerateReq, ctx: &GenerateReportContext, content: &str) -> AppResult<Report> {
     if let Some(existing) = find_existing_report(conn, req)? {
+        if req.append_existing && req.r#type == "daily" {
+            let existing_summary = parse_commit_summary(&existing.commit_summary);
+            let current_summary = parse_commit_summary(&ctx.commit_summary);
+            let delta_commits = diff_project_commits(&current_summary, &existing_summary);
+            let merged_content = merge_daily_report_content(&existing.content, &delta_commits);
+
+            conn.execute(
+                "UPDATE report SET title = ?, content = ?, commit_summary = ?, updated_at = datetime('now','localtime') WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+                params![existing.title, merged_content, ctx.commit_summary, existing.id],
+            )?;
+            return get_report_detail(conn, existing.id);
+        }
+
         if req.force {
             let title = format!("{} ({} ~ {})", ctx.type_label, req.start_date, req.end_date);
             conn.execute(
@@ -1355,6 +1368,103 @@ pub fn generate_report_upsert(conn: &Connection, req: &ReportGenerateReq, ctx: &
     )?;
     let id = conn.last_insert_rowid() as i32;
     get_report_detail(conn, id)
+}
+
+fn parse_commit_summary(summary_text: &str) -> HashMap<String, Vec<String>> {
+    let parsed = serde_json::from_str::<HashMap<String, Vec<String>>>(summary_text).unwrap_or_default();
+    normalize_project_commits(parsed)
+}
+
+fn normalize_project_commits(raw: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+    let mut normalized: HashMap<String, Vec<String>> = HashMap::new();
+    for (project, messages) in raw {
+        let project_name = project.trim();
+        if project_name.is_empty() {
+            continue;
+        }
+
+        let mut unique: Vec<String> = Vec::new();
+        let mut seen = HashSet::new();
+        for message in messages {
+            let trimmed = message.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if seen.insert(trimmed.to_string()) {
+                unique.push(trimmed.to_string());
+            }
+        }
+
+        if !unique.is_empty() {
+            normalized.insert(project_name.to_string(), unique);
+        }
+    }
+    normalized
+}
+
+fn diff_project_commits(
+    current: &HashMap<String, Vec<String>>,
+    baseline: &HashMap<String, Vec<String>>,
+) -> HashMap<String, Vec<String>> {
+    let mut delta: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (project, current_messages) in current {
+        let baseline_set: HashSet<String> = baseline
+            .get(project)
+            .map(|items| items.iter().map(|item| item.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        let mut new_items: Vec<String> = Vec::new();
+        let mut seen = HashSet::new();
+        for message in current_messages {
+            let trimmed = message.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if baseline_set.contains(trimmed) {
+                continue;
+            }
+            if seen.insert(trimmed.to_string()) {
+                new_items.push(trimmed.to_string());
+            }
+        }
+
+        if !new_items.is_empty() {
+            delta.insert(project.clone(), new_items);
+        }
+    }
+
+    delta
+}
+
+fn merge_daily_report_content(existing_content: &str, delta_commits: &HashMap<String, Vec<String>>) -> String {
+    if delta_commits.is_empty() {
+        return existing_content.to_string();
+    }
+
+    let mut projects: Vec<&String> = delta_commits.keys().collect();
+    projects.sort();
+
+    let mut supplement = String::new();
+    supplement.push_str(&format!(
+        "## 自动补充（{}）\n",
+        Local::now().format("%Y-%m-%d %H:%M")
+    ));
+    for project in projects {
+        supplement.push_str(&format!("### {}\n", project));
+        if let Some(messages) = delta_commits.get(project) {
+            for message in messages {
+                supplement.push_str(&format!("- {}\n", message));
+            }
+        }
+        supplement.push('\n');
+    }
+
+    let base = existing_content.trim_end();
+    if base.is_empty() {
+        return supplement.trim_end().to_string();
+    }
+    format!("{}\n\n{}", base, supplement.trim_end())
 }
 
 pub fn generate_fallback(
@@ -1513,6 +1623,7 @@ mod tests {
             start_date: "2026-02-01".to_string(),
             end_date: "2026-02-07".to_string(),
             force: false,
+            append_existing: false,
             author_email: None,
             project_ids: None,
         };
