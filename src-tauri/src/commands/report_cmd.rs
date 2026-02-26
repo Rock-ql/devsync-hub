@@ -87,7 +87,7 @@ async fn sync_projects_before_daily_report(state: &AppState, req: &ReportGenerat
             "running",
         );
 
-        if project.gitlab_url.trim().is_empty() || project.gitlab_project_id <= 0 {
+        if project.gitlab_url.trim().is_empty() {
             skipped += 1;
             log::info!(
                 "[报告生成] 跳过项目同步（未配置 GitLab）: id={}, name={}",
