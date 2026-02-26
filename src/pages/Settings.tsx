@@ -9,6 +9,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionLabel } from '@/components/ui/section-label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
@@ -22,6 +23,8 @@ const SETTING_KEYS = {
   WEEKLY_TEMPLATE: 'report.template.weekly',
   GIT_AUTHOR_EMAIL: 'git.author.email',
   GIT_GITLAB_TOKEN: 'git.gitlab.token',
+  DEBUG_LOG_ENABLED: 'debug.log.enabled',
+  DEBUG_LOG_LEVEL: 'debug.log.level',
 }
 
 export default function Settings() {
@@ -164,6 +167,9 @@ export default function Settings() {
     totalBytes && totalBytes > 0
       ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
       : null
+  const debugLogEnabledValue = settingForm[SETTING_KEYS.DEBUG_LOG_ENABLED] ?? settings?.[SETTING_KEYS.DEBUG_LOG_ENABLED] ?? '0'
+  const debugLogEnabled = debugLogEnabledValue === '1'
+  const debugLogLevel = (settingForm[SETTING_KEYS.DEBUG_LOG_LEVEL] ?? settings?.[SETTING_KEYS.DEBUG_LOG_LEVEL] ?? 'info').toLowerCase()
 
   const requestDeleteApiKey = (id: number, name: string) => {
     openConfirm(
@@ -297,6 +303,60 @@ export default function Settings() {
                         {showGitlabToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
+                  </div>
+                  <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
+                    {updateSettingMutation.isPending ? '保存中...' : '保存设置'}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>调试日志</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {settingsLoading ? (
+                <div className="text-center py-6 text-muted-foreground">加载中...</div>
+              ) : (
+                <div className="space-y-4 max-w-lg">
+                  <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/40 px-4 py-3">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium">开启调试日志</Label>
+                      <p className="text-xs text-muted-foreground">开启后可在控制台实时查看前后端日志</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={debugLogEnabled}
+                      onChange={(e) => setSettingForm({
+                        ...settingForm,
+                        [SETTING_KEYS.DEBUG_LOG_ENABLED]: e.target.checked ? '1' : '0',
+                      })}
+                      className="h-4 w-4 accent-[hsl(var(--accent))]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>日志级别</Label>
+                    <Select
+                      value={debugLogLevel}
+                      onValueChange={(value) => setSettingForm({
+                        ...settingForm,
+                        [SETTING_KEYS.DEBUG_LOG_LEVEL]: value,
+                      })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="error">ERROR</SelectItem>
+                        <SelectItem value="warn">WARN</SelectItem>
+                        <SelectItem value="info">INFO</SelectItem>
+                        <SelectItem value="debug">DEBUG</SelectItem>
+                        <SelectItem value="trace">TRACE</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">当前级别会同时作用于前端与后端日志输出</p>
                   </div>
                   <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
                     {updateSettingMutation.isPending ? '保存中...' : '保存设置'}

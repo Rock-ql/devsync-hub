@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Outlet, Link, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   LayoutDashboard,
   FolderGit2,
   IterationCw,
   Database,
   FileText,
+  Terminal,
   Settings,
   Menu,
   Moon,
@@ -16,10 +18,14 @@ import {
 import { cn } from '@/lib/utils'
 import { useSSE } from '@/hooks/useSSE'
 import { toast } from '@/components/ui/toaster'
+import { buildSettingMap, settingApi } from '@/api/setting'
+import { normalizeLogLevel, useConsoleStore } from '@/stores/console'
 import { useUpdateStore } from '@/stores/update'
 import { UpdateDialog } from '@/components/update/UpdateDialog'
 
 const GITHUB_REPO_URL = 'https://github.com/Rock-ql/devsync-hub'
+const DEBUG_LOG_ENABLED_KEY = 'debug.log.enabled'
+const DEBUG_LOG_LEVEL_KEY = 'debug.log.level'
 
 const navigation = [
   { name: '仪表盘', href: '/', icon: LayoutDashboard },
@@ -27,6 +33,7 @@ const navigation = [
   { name: '迭代管理', href: '/iterations', icon: IterationCw },
   { name: '执行事项', href: '/sql', icon: Database },
   { name: '日报周报', href: '/reports', icon: FileText },
+  { name: '控制台', href: '/console', icon: Terminal },
   { name: '系统设置', href: '/settings', icon: Settings },
 ]
 
@@ -64,6 +71,14 @@ export default function Layout() {
   const setUpdateDialogOpen = useUpdateStore((state) => state.setDialogOpen)
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates)
   const loadCurrentVersion = useUpdateStore((state) => state.loadCurrentVersion)
+  const setConsoleConfig = useConsoleStore((state) => state.setConfig)
+  const addConsoleLog = useConsoleStore((state) => state.addLog)
+
+  const { data: settingsMap } = useQuery({
+    queryKey: ['settings', 'map'],
+    queryFn: () => settingApi.getAll(),
+    select: buildSettingMap,
+  })
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try {
@@ -90,12 +105,34 @@ export default function Layout() {
 
   const syncToastRef = useRef<Map<number, ReturnType<typeof toast>>>(new Map())
 
+  useEffect(() => {
+    const enabled = settingsMap?.[DEBUG_LOG_ENABLED_KEY] === '1'
+    const level = normalizeLogLevel(settingsMap?.[DEBUG_LOG_LEVEL_KEY] || 'info')
+    setConsoleConfig(enabled, level)
+  }, [settingsMap, setConsoleConfig])
+
   useSSE({
-    events: ['project_sync'],
+    events: ['project_sync', 'app_log'],
     onMessage: (eventName, data) => {
-      if (eventName !== 'project_sync') {
+      if (eventName === 'app_log') {
+        try {
+          const payload = JSON.parse(data) as Record<string, unknown>
+          const level = normalizeLogLevel(String(payload.level || 'info'))
+          const sourceText = String(payload.source || 'backend').toLowerCase()
+          const source = sourceText === 'frontend' ? 'frontend' : 'backend'
+          addConsoleLog({
+            source,
+            level,
+            target: String(payload.target || ''),
+            message: String(payload.message || ''),
+            timestamp: String(payload.timestamp || ''),
+          })
+        } catch {
+          // ignore malformed log payload
+        }
         return
       }
+      if (eventName !== 'project_sync') return
 
       let payload: Record<string, unknown>
       try {

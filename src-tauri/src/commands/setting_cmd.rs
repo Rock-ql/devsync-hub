@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 use crate::AppState;
 use crate::error::AppResult;
+use crate::logging;
 use crate::models::system_setting::*;
 use crate::models::api_key::*;
 use crate::services::setting_service;
@@ -14,13 +15,15 @@ pub async fn get_all_settings(state: State<'_, AppState>) -> AppResult<Vec<Syste
 #[tauri::command]
 pub async fn update_setting(state: State<'_, AppState>, req: SettingUpdateReq) -> AppResult<()> {
     let db = state.db.lock().await;
-    setting_service::update_setting(&db.conn, &req)
+    setting_service::update_setting(&db.conn, &req)?;
+    logging::refresh_debug_settings(&db.conn)
 }
 
 #[tauri::command]
 pub async fn batch_update_settings(state: State<'_, AppState>, req: BatchSettingUpdateReq) -> AppResult<()> {
     let db = state.db.lock().await;
-    setting_service::batch_update_settings(&db.conn, &req.settings)
+    setting_service::batch_update_settings(&db.conn, &req.settings)?;
+    logging::refresh_debug_settings(&db.conn)
 }
 
 #[tauri::command]

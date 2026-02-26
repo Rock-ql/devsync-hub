@@ -5,6 +5,7 @@ pub mod commands;
 pub mod clients;
 pub mod axum_gateway;
 pub mod error;
+pub mod logging;
 
 use db::Database;
 use std::sync::Arc;
@@ -16,10 +17,9 @@ pub struct AppState {
 }
 
 pub fn run() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
     let db = Database::new().expect("Failed to initialize database");
     db.migrate().expect("Failed to run database migrations");
+    logging::init_logger(&db.conn).expect("Failed to initialize logger");
 
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
