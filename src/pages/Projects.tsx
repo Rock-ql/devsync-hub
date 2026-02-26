@@ -235,7 +235,7 @@ export default function Projects() {
         </Button>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 2xl:grid-cols-3">
         {data?.records?.length ? (
           data.records.map((project) => (
             <Card
@@ -301,7 +301,7 @@ export default function Projects() {
             </Card>
           ))
         ) : (
-          <Card className="md:col-span-2 xl:col-span-3">
+          <Card className="md:col-span-2 2xl:col-span-3">
             <CardContent className="py-12 text-center text-sm text-muted-foreground">
               暂无项目，请先新增项目
             </CardContent>

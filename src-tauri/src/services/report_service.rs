@@ -3,7 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::report::*;
 use crate::models::common::PageResult;
 use crate::models::requirement::Requirement;
-use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone};
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
 use std::collections::{HashMap, HashSet};
 
 const NEAREST_ANCHOR_MAX_MINUTES: i64 = 30;
@@ -1439,32 +1439,43 @@ fn diff_project_commits(
 
 fn merge_daily_report_content(existing_content: &str, delta_commits: &HashMap<String, Vec<String>>) -> String {
     if delta_commits.is_empty() {
-        return existing_content.to_string();
+        return strip_daily_empty_placeholder(existing_content).to_string();
     }
 
+    let supplement = render_delta_commits(delta_commits);
+    let base = strip_daily_empty_placeholder(existing_content).trim_end();
+    if base.is_empty() {
+        return supplement;
+    }
+    format!("{}\n\n{}", base, supplement)
+}
+
+fn strip_daily_empty_placeholder(content: &str) -> &str {
+    let trimmed = content.trim();
+    if trimmed == "今日暂无工作内容" || trimmed == "今日暂无工作内容：" {
+        return "";
+    }
+    content
+}
+
+fn render_delta_commits(delta_commits: &HashMap<String, Vec<String>>) -> String {
     let mut projects: Vec<&String> = delta_commits.keys().collect();
     projects.sort();
 
-    let mut supplement = String::new();
-    supplement.push_str(&format!(
-        "## 自动补充（{}）\n",
-        Local::now().format("%Y-%m-%d %H:%M")
-    ));
+    let mut lines: Vec<String> = Vec::new();
     for project in projects {
-        supplement.push_str(&format!("### {}\n", project));
         if let Some(messages) = delta_commits.get(project) {
             for message in messages {
-                supplement.push_str(&format!("- {}\n", message));
+                let normalized_message = message.trim();
+                if normalized_message.is_empty() {
+                    continue;
+                }
+                lines.push(format!("- 【{}】{}", project, normalized_message));
             }
         }
-        supplement.push('\n');
     }
 
-    let base = existing_content.trim_end();
-    if base.is_empty() {
-        return supplement.trim_end().to_string();
-    }
-    format!("{}\n\n{}", base, supplement.trim_end())
+    lines.join("\n")
 }
 
 pub fn generate_fallback(
