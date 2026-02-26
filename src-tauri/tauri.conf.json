@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/nicegui/static/tauri.conf.schema.json",
   "productName": "DevSync Hub",
-  "version": "2.0.16",
+  "version": "2.0.17",
   "identifier": "com.devsync.hub",
   "build": {
     "beforeDevCommand": "npm run dev",
