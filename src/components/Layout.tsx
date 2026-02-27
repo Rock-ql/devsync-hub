@@ -15,6 +15,7 @@ import {
   X,
   Github,
 } from 'lucide-react'
+import { open as openExternal } from '@tauri-apps/plugin-shell'
 import { cn } from '@/lib/utils'
 import { useSSE } from '@/hooks/useSSE'
 import { toast } from '@/components/ui/toaster'
@@ -204,12 +205,25 @@ export default function Layout() {
     }
   }, [checkForUpdates, loadCurrentVersion])
 
+  const openGithubRepo = async () => {
+    try {
+      await openExternal(GITHUB_REPO_URL)
+      return
+    } catch {
+      // ignore and fallback to browser open
+    }
+
+    if (typeof window !== 'undefined') {
+      window.open(GITHUB_REPO_URL, '_blank', 'noopener,noreferrer')
+    }
+  }
+
   const handleGithubClick = () => {
     if (hasPendingUpdate) {
       setUpdateDialogOpen(true)
       return
     }
-    window.open(GITHUB_REPO_URL, '_blank', 'noopener,noreferrer')
+    void openGithubRepo()
   }
 
   const renderNavigation = (onNavigate?: () => void) => (
