@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PageResult } from '@/api'
 import { sqlApi, PendingSqlDetail } from '@/api/sql'
 import { projectApi, Project } from '@/api/project'
 import { iterationApi } from '@/api/iteration'
 import { requirementApi, RequirementItem } from '@/api/requirement'
+import { buildSettingMap, settingApi } from '@/api/setting'
 import { Eye, Plus, Trash2, Pencil } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,14 +25,7 @@ import { ExecuteConfirmDialog } from '@/components/sql/ExecuteConfirmDialog'
 import RequirementLinkDialog from '@/components/requirement/RequirementLinkDialog'
 import { useSqlStore } from '@/stores/useSqlStore'
 import { SQL_STATUS_LABEL } from '@/constants/status'
-
-const FIXED_ENV_OPTIONS = [
-  { envCode: 'local', envName: 'local' },
-  { envCode: 'dev', envName: 'dev' },
-  { envCode: 'test', envName: 'test' },
-  { envCode: 'smoke', envName: 'smoke' },
-  { envCode: 'prod', envName: 'prod' },
-]
+import { ENVIRONMENT_OPTIONS_SETTING_KEY, parseEnvironmentOptions } from '@/lib/environmentOptions'
 
 interface RequirementGroup {
   iterationId: number
@@ -122,6 +116,15 @@ export default function SqlManagement() {
     queryKey: ['projects-all'],
     queryFn: () => projectApi.listAll(),
   })
+  const { data: settingsMap } = useQuery({
+    queryKey: ['settings', 'map'],
+    queryFn: () => settingApi.getAll(),
+    select: buildSettingMap,
+  })
+  const configuredEnvOptions = useMemo(
+    () => parseEnvironmentOptions(settingsMap?.[ENVIRONMENT_OPTIONS_SETTING_KEY]),
+    [settingsMap],
+  )
 
   const addMutation = useMutation({
     mutationFn: (data: typeof formData) => sqlApi.add({
@@ -237,7 +240,7 @@ export default function SqlManagement() {
 
   const buildEnvItems = (sql?: PendingSqlDetail | null): EnvExecutionItem[] => {
     const map = new Map((sql?.env_executions || []).map((item) => [item.env_code, item]))
-    return FIXED_ENV_OPTIONS.map((option) => {
+    const items = configuredEnvOptions.map((option) => {
       const existing = map.get(option.envCode)
       return {
         envCode: option.envCode,
@@ -248,6 +251,22 @@ export default function SqlManagement() {
         remark: existing?.remark ?? undefined,
       }
     })
+
+    for (const existing of sql?.env_executions || []) {
+      if (items.some((item) => item.envCode === existing.env_code)) {
+        continue
+      }
+      items.push({
+        envCode: existing.env_code,
+        envName: existing.env_name || existing.env_code,
+        executed: existing.executed,
+        executedAt: existing.executed_at ?? undefined,
+        executor: existing.executor ?? undefined,
+        remark: existing.remark ?? undefined,
+      })
+    }
+
+    return items
   }
 
   const handleOpenExecute = (sql: PendingSqlDetail, envCode?: string) => {

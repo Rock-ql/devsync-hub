@@ -23,6 +23,7 @@ const SETTING_KEYS = {
   WEEKLY_TEMPLATE: 'report.template.weekly',
   GIT_AUTHOR_EMAIL: 'git.author.email',
   GIT_GITLAB_TOKEN: 'git.gitlab.token',
+  ENVIRONMENT_OPTIONS: 'work.environment.options',
   DEBUG_LOG_ENABLED: 'debug.log.enabled',
   DEBUG_LOG_LEVEL: 'debug.log.level',
 }
@@ -357,6 +358,43 @@ export default function Settings() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">当前级别会同时作用于前端与后端日志输出</p>
+                  </div>
+                  <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
+                    {updateSettingMutation.isPending ? '保存中...' : '保存设置'}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>统一环境配置</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {settingsLoading ? (
+                <div className="text-center py-6 text-muted-foreground">加载中...</div>
+              ) : (
+                <div className="space-y-4 max-w-lg">
+                  <div className="space-y-2">
+                    <Label>环境列表</Label>
+                    <Textarea
+                      value={
+                        settingForm[SETTING_KEYS.ENVIRONMENT_OPTIONS]
+                        || settings?.[SETTING_KEYS.ENVIRONMENT_OPTIONS]
+                        || ''
+                      }
+                      onChange={(e) => setSettingForm({
+                        ...settingForm,
+                        [SETTING_KEYS.ENVIRONMENT_OPTIONS]: e.target.value,
+                      })}
+                      rows={8}
+                      className="font-mono text-sm"
+                      placeholder={`local: 本地\n dev: 开发\n test: 测试\n smoke: 冒烟\n prod: 生产`}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      一行一个环境，支持「编码:名称」或仅填「编码」。该配置会同时用于“需求管理”的环境和“执行事项”的环境。
+                    </p>
                   </div>
                   <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
                     {updateSettingMutation.isPending ? '保存中...' : '保存设置'}

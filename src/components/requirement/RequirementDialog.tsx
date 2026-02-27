@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { requirementApi, RequirementItem } from '@/api/requirement'
+import { buildSettingMap, settingApi } from '@/api/setting'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
+import { ENVIRONMENT_OPTIONS_SETTING_KEY, parseEnvironmentOptions } from '@/lib/environmentOptions'
 
 interface ProjectOption {
   id: number
@@ -22,6 +24,18 @@ interface RequirementDialogProps {
   initialData?: RequirementItem | null
   onSaved?: () => void
 }
+
+const STATUS_OPTIONS = [
+  { code: 'presented', desc: '已宣讲' },
+  { code: 'pending_dev', desc: '待研发' },
+  { code: 'developing', desc: '开发中' },
+  { code: 'integrating', desc: '联调中' },
+  { code: 'pending_test', desc: '待测试' },
+  { code: 'testing', desc: '测试中' },
+  { code: 'pending_acceptance', desc: '待验收' },
+  { code: 'pending_release', desc: '待上线' },
+  { code: 'released', desc: '已上线' },
+]
 
 export default function RequirementDialog({
   open,
@@ -40,19 +54,12 @@ export default function RequirementDialog({
   const [status, setStatus] = useState('presented')
   const [branch, setBranch] = useState('')
 
-  const statusOptions = [
-    { code: 'presented', desc: '已宣讲' },
-    { code: 'pending_dev', desc: '待研发' },
-    { code: 'developing', desc: '开发中' },
-    { code: 'integrating', desc: '联调中' },
-    { code: 'pending_test', desc: '待测试' },
-    { code: 'testing', desc: '测试中' },
-    { code: 'pending_acceptance', desc: '待验收' },
-    { code: 'pending_release', desc: '待上线' },
-    { code: 'released', desc: '已上线' },
-  ]
-
   const isEditing = !!initialData?.id
+  const { data: settingsMap } = useQuery({
+    queryKey: ['settings', 'map'],
+    queryFn: () => settingApi.getAll(),
+    select: buildSettingMap,
+  })
 
   useEffect(() => {
     if (open) {
@@ -67,22 +74,26 @@ export default function RequirementDialog({
   }, [open, initialData])
 
   const projectOptions = useMemo(() => projects || [], [projects])
+  const environmentOptions = useMemo(
+    () => parseEnvironmentOptions(settingsMap?.[ENVIRONMENT_OPTIONS_SETTING_KEY]),
+    [settingsMap],
+  )
 
   const editableStatusOptions = useMemo(() => {
     if (!isEditing) {
-      return statusOptions
+      return STATUS_OPTIONS
     }
 
     const current = initialData?.status || 'presented'
-    const index = statusOptions.findIndex((item) => item.code === current)
+    const index = STATUS_OPTIONS.findIndex((item) => item.code === current)
     if (index < 0) {
-      return statusOptions.slice(0, 1)
+      return STATUS_OPTIONS.slice(0, 1)
     }
 
     const candidates: Array<{ code: string; desc: string }> = []
-    if (index - 1 >= 0) candidates.push(statusOptions[index - 1])
-    candidates.push(statusOptions[index])
-    if (index + 1 < statusOptions.length) candidates.push(statusOptions[index + 1])
+    if (index - 1 >= 0) candidates.push(STATUS_OPTIONS[index - 1])
+    candidates.push(STATUS_OPTIONS[index])
+    if (index + 1 < STATUS_OPTIONS.length) candidates.push(STATUS_OPTIONS[index + 1])
     return candidates
   }, [initialData?.status, isEditing])
 
@@ -163,9 +174,11 @@ export default function RequirementDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">未填写</SelectItem>
-                  <SelectItem value="dev">dev</SelectItem>
-                  <SelectItem value="smoke">smoke</SelectItem>
-                  <SelectItem value="prod">prod</SelectItem>
+                  {environmentOptions.map((option) => (
+                    <SelectItem key={option.envCode} value={option.envCode}>
+                      {option.envName}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
