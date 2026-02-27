@@ -392,19 +392,16 @@ fn build_daily_summary_by_requirement(conn: &Connection, commits: &[CommitInfo],
         }
 
         has_requirement_content = true;
-        let project_display = format_requirement_projects(&grouped_commits);
         let status_text = format_requirement_status(&coded.requirement.status);
         let environment = coded.requirement.environment.trim();
-        let bracket_text = if environment.is_empty() {
-            format!("状态: {}", status_text)
+        let requirement_title = trim_requirement_code_prefix(&coded.requirement.name, &coded.code);
+        let status_display = if environment.is_empty() {
+            status_text.to_string()
         } else {
-            format!("状态: {}, 环境: {}", status_text, environment)
+            format!("{}, {}", status_text, environment)
         };
 
-        output.push_str(&format!(
-            "### {}【{}】{} ({})\n",
-            coded.code, project_display, coded.requirement.name, bracket_text
-        ));
+        output.push_str(&format!("### {}（{}）\n", requirement_title, status_display));
         append_commit_lines(&mut output, &grouped_commits);
         output.push('\n');
     }
@@ -1016,29 +1013,6 @@ fn group_commits_by_project(commits: &[CommitInfo]) -> Vec<(String, Vec<String>)
     result
 }
 
-fn format_requirement_projects(commits: &[CommitInfo]) -> String {
-    let mut seen = HashSet::new();
-    let mut ordered_projects: Vec<String> = Vec::new();
-
-    for commit in commits {
-        let project_name = if commit.project_name.trim().is_empty() {
-            format!("项目{}", commit.project_id)
-        } else {
-            commit.project_name.clone()
-        };
-
-        if seen.insert(project_name.clone()) {
-            ordered_projects.push(project_name);
-        }
-    }
-
-    if ordered_projects.is_empty() {
-        "未关联项目".to_string()
-    } else {
-        ordered_projects.join("/")
-    }
-}
-
 fn normalize_commit_message(message: &str) -> String {
     message.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -1058,6 +1032,43 @@ fn format_requirement_status(status: &str) -> &'static str {
     }
 }
 
+fn trim_requirement_code_prefix(requirement_name: &str, requirement_code: &str) -> String {
+    let trimmed_name = requirement_name.trim();
+    if trimmed_name.is_empty() {
+        return String::new();
+    }
+
+    let trimmed_code = requirement_code.trim();
+    if trimmed_code.is_empty() {
+        return trimmed_name.to_string();
+    }
+
+    let code_char_count = trimmed_code.chars().count();
+    let mut code_end_idx = 0usize;
+    let mut chars = trimmed_name.char_indices();
+    for _ in 0..code_char_count {
+        let Some((idx, ch)) = chars.next() else {
+            return trimmed_name.to_string();
+        };
+        code_end_idx = idx + ch.len_utf8();
+    }
+
+    let code_prefix = &trimmed_name[..code_end_idx];
+    if !code_prefix.eq_ignore_ascii_case(trimmed_code) {
+        return trimmed_name.to_string();
+    }
+
+    let remaining = trimmed_name[code_end_idx..]
+        .trim_start_matches(|c: char| matches!(c, ' ' | '-' | '_' | ':' | '：' | '.' | '、'))
+        .trim();
+
+    if remaining.is_empty() {
+        trimmed_name.to_string()
+    } else {
+        remaining.to_string()
+    }
+}
+
 fn is_merge_commit(message: &str) -> bool {
     let normalized = message.trim().to_lowercase();
     normalized.starts_with("merge branch")
@@ -1067,7 +1078,7 @@ fn is_merge_commit(message: &str) -> bool {
 }
 
 fn build_daily_template_reference(template: &str) -> String {
-    let default_reference = "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作";
+    let default_reference = "今日工作内容：\n1. 需求名称（状态，环境）\n   1. 具体工作";
     if template.trim().is_empty() {
         return default_reference.to_string();
     }
@@ -1095,8 +1106,10 @@ fn build_daily_template_reference(template: &str) -> String {
         normalized = format!("今日工作内容：\n{}", normalized);
     }
 
-    if !normalized.contains("需求编号") {
-        normalized.push_str("\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作");
+    normalized = normalized.replace("需求编号【项目名】需求名称（状态，环境）", "需求名称（状态，环境）");
+
+    if !normalized.contains("需求名称") && !normalized.contains("需求编号") {
+        normalized.push_str("\n1. 需求名称（状态，环境）\n   1. 具体工作");
     }
 
     normalized
@@ -1125,7 +1138,7 @@ fn build_weekly_summary_from_daily_reports_with_projects(
     end_date: &str,
 ) -> (String, HashMap<String, Vec<String>>) {
     let mut stmt = match conn.prepare(
-        "SELECT id, content, start_date FROM report \
+        "SELECT id, content, start_date, commit_summary FROM report \
          WHERE type = 'daily' AND state = 1 AND deleted_at IS NULL \
          AND start_date >= ? AND start_date <= ? \
          ORDER BY start_date ASC, id DESC",
@@ -1134,9 +1147,13 @@ fn build_weekly_summary_from_daily_reports_with_projects(
         Err(_) => return (String::new(), HashMap::new()),
     };
 
-    let reports: Vec<(String, String)> = stmt
+    let reports: Vec<(String, String, String)> = stmt
         .query_map(params![start_date, end_date], |row| {
-            Ok((row.get::<_, String>(2)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(3)?,
+            ))
         })
         .ok()
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
@@ -1148,18 +1165,23 @@ fn build_weekly_summary_from_daily_reports_with_projects(
 
     // 每天只取最新一份日报（按 start_date 去重）
     let mut seen_dates = HashSet::new();
-    let mut unique_contents: Vec<String> = Vec::new();
-    for (date, content) in reports {
+    let mut unique_reports: Vec<(String, String)> = Vec::new();
+    for (date, content, commit_summary) in reports {
         if seen_dates.insert(date) {
-            unique_contents.push(content);
+            unique_reports.push((content, commit_summary));
         }
     }
 
-    // 从日报内容提取项目-工作映射（保持项目出现顺序）
+    // 优先从日报 commit_summary 读取项目-工作映射；若为空则回退解析日报内容
     let mut project_order: Vec<String> = Vec::new();
     let mut project_work: HashMap<String, Vec<String>> = HashMap::new();
-    for content in unique_contents {
-        extract_project_work_from_daily(&content, &mut project_work, &mut project_order);
+    for (content, commit_summary) in unique_reports {
+        let parsed_summary = parse_commit_summary(&commit_summary);
+        if parsed_summary.is_empty() {
+            extract_project_work_from_daily(&content, &mut project_work, &mut project_order);
+            continue;
+        }
+        append_project_work_from_summary(&parsed_summary, &mut project_work, &mut project_order);
     }
 
     if project_work.is_empty() {
@@ -1185,6 +1207,35 @@ fn build_weekly_summary_from_daily_reports_with_projects(
     }
 
     (summary, project_work)
+}
+
+fn append_project_work_from_summary(
+    summary: &HashMap<String, Vec<String>>,
+    project_work: &mut HashMap<String, Vec<String>>,
+    project_order: &mut Vec<String>,
+) {
+    for (project, items) in summary {
+        let project_name = project.trim();
+        if project_name.is_empty() {
+            continue;
+        }
+
+        if !project_work.contains_key(project_name) {
+            project_order.push(project_name.to_string());
+            project_work.insert(project_name.to_string(), Vec::new());
+        }
+
+        let entry = project_work.entry(project_name.to_string()).or_default();
+        for item in items {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if !entry.contains(&trimmed.to_string()) {
+                entry.push(trimmed.to_string());
+            }
+        }
+    }
 }
 
 /// 从日报 Markdown 内容中提取项目和工作项
@@ -1612,6 +1663,30 @@ mod tests {
     }
 
     #[test]
+    fn trim_requirement_code_prefix_removes_leading_code() {
+        assert_eq!(
+            trim_requirement_code_prefix("XYGJ-1469 邮件接收验证码日志需求", "XYGJ-1469"),
+            "邮件接收验证码日志需求".to_string()
+        );
+        assert_eq!(
+            trim_requirement_code_prefix("xygj-1469: 邮件接收验证码日志需求", "XYGJ-1469"),
+            "邮件接收验证码日志需求".to_string()
+        );
+        assert_eq!(
+            trim_requirement_code_prefix("邮件接收验证码日志需求", "XYGJ-1469"),
+            "邮件接收验证码日志需求".to_string()
+        );
+    }
+
+    #[test]
+    fn build_daily_template_reference_replaces_legacy_requirement_example() {
+        let legacy = "今日工作内容：\n1. 需求编号【项目名】需求名称（状态，环境）\n   1. 具体工作";
+        let normalized = build_daily_template_reference(legacy);
+        assert!(!normalized.contains("需求编号【项目名】"));
+        assert!(normalized.contains("需求名称（状态，环境）"));
+    }
+
+    #[test]
     fn extract_project_name_handles_bracket_and_markdown_titles() {
         assert_eq!(extract_project_name("## DevSync"), Some("DevSync".to_string()));
         assert_eq!(extract_project_name("### DevSync"), Some("DevSync".to_string()));
@@ -1675,5 +1750,35 @@ mod tests {
         let ctx = generate_report_prepare(&conn, &req).expect("weekly prepare");
         assert!(!ctx.structured_input.trim().is_empty());
         assert!(ctx.structured_input.contains("项目A"));
+    }
+
+    #[test]
+    fn weekly_prepare_prefers_commit_summary_when_daily_titles_are_simplified() {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        crate::db::schema::run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO report (type, title, content, start_date, end_date, commit_summary) VALUES ('daily', 'd1', ?, '2026-02-01', '2026-02-01', ?)",
+            params![
+                "今日工作内容：\n1. 邮件接收验证码日志需求（测试中，dev）\n   1. 完成模块X\n\n",
+                "{\"项目A\":[\"完成模块X\"]}",
+            ],
+        )
+        .unwrap();
+
+        let req = ReportGenerateReq {
+            r#type: "weekly".to_string(),
+            start_date: "2026-02-01".to_string(),
+            end_date: "2026-02-07".to_string(),
+            force: false,
+            append_existing: false,
+            author_email: None,
+            project_ids: None,
+        };
+
+        let ctx = generate_report_prepare(&conn, &req).expect("weekly prepare");
+        assert!(ctx.structured_input.contains("## 项目A"));
+        assert!(ctx.structured_input.contains("- 完成模块X"));
     }
 }
