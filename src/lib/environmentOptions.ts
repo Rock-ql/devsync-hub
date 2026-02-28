@@ -40,6 +40,10 @@ function splitOptionLine(line: string): { code: string; name: string } | null {
   }
 }
 
+export function serializeEnvironmentOptions(options: EnvironmentOption[]): string {
+  return options.map(o => `${o.envCode}: ${o.envName}`).join('\n')
+}
+
 export function parseEnvironmentOptions(rawSetting: string | null | undefined): EnvironmentOption[] {
   const raw = rawSetting?.trim()
   if (!raw) return DEFAULT_ENVIRONMENT_OPTIONS

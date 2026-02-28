@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { buildSettingMap, settingApi, type ImportResult } from '@/api/setting'
-import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download, RefreshCw } from 'lucide-react'
+import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check, Upload, Download, RefreshCw, ArrowUp, ArrowDown, Pencil, Save, X } from 'lucide-react'
+import { parseEnvironmentOptions, serializeEnvironmentOptions, type EnvironmentOption } from '@/lib/environmentOptions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -38,6 +39,12 @@ export default function Settings() {
   const [newKeyValue, setNewKeyValue] = useState('')
   const [copied, setCopied] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [envList, setEnvList] = useState<EnvironmentOption[]>([])
+  const [newEnvCode, setNewEnvCode] = useState('')
+  const [newEnvName, setNewEnvName] = useState('')
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const [envListInitialized, setEnvListInitialized] = useState(false)
   const {
     currentVersion,
     latestVersion,
@@ -80,6 +87,13 @@ export default function Settings() {
   })
 
   const [settingForm, setSettingForm] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (settings && !envListInitialized) {
+      setEnvList(parseEnvironmentOptions(settings[SETTING_KEYS.ENVIRONMENT_OPTIONS]))
+      setEnvListInitialized(true)
+    }
+  }, [settings, envListInitialized])
 
   const updateSettingMutation = useMutation({
     mutationFn: (data: Record<string, string>) => settingApi.batchUpdate(data),
@@ -378,25 +392,180 @@ export default function Settings() {
                 <div className="space-y-4 max-w-lg">
                   <div className="space-y-2">
                     <Label>环境列表</Label>
-                    <Textarea
-                      value={
-                        settingForm[SETTING_KEYS.ENVIRONMENT_OPTIONS]
-                        || settings?.[SETTING_KEYS.ENVIRONMENT_OPTIONS]
-                        || ''
-                      }
-                      onChange={(e) => setSettingForm({
-                        ...settingForm,
-                        [SETTING_KEYS.ENVIRONMENT_OPTIONS]: e.target.value,
-                      })}
-                      rows={8}
-                      className="font-mono text-sm"
-                      placeholder={`local: 本地\n dev: 开发\n test: 测试\n smoke: 冒烟\n prod: 生产`}
-                    />
                     <p className="text-xs text-muted-foreground">
-                      一行一个环境，支持「编码:名称」或仅填「编码」。该配置会同时用于“需求管理”的环境和“执行事项”的环境。
+                      该配置会同时用于"需求管理"的环境和"执行事项"的环境。
                     </p>
                   </div>
-                  <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>
+
+                  {envList.length > 0 ? (
+                    <div className="space-y-3">
+                      {envList.map((item, index) => {
+                        const isEditing = editingIndex === index
+                        return (
+                          <div
+                            key={item.envCode}
+                            className="flex flex-col gap-3 rounded-xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <code className="rounded bg-muted px-2 py-1 text-xs">{item.envCode}</code>
+                                {isEditing ? (
+                                  <Input
+                                    value={editingName}
+                                    onChange={(e) => setEditingName(e.target.value)}
+                                    className="h-9 max-w-[240px]"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        const name = editingName.trim()
+                                        if (!name) return
+                                        setEnvList(envList.map((env, i) => i === index ? { ...env, envName: name } : env))
+                                        setEditingIndex(null)
+                                        setEditingName('')
+                                      } else if (e.key === 'Escape') {
+                                        setEditingIndex(null)
+                                        setEditingName('')
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <span className="truncate text-sm font-medium text-foreground">{item.envName}</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-9 w-9 p-0"
+                                disabled={index === 0}
+                                onClick={() => {
+                                  const newList = [...envList]
+                                  ;[newList[index - 1], newList[index]] = [newList[index], newList[index - 1]]
+                                  setEnvList(newList)
+                                }}
+                                aria-label="上移"
+                              >
+                                <ArrowUp className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-9 w-9 p-0"
+                                disabled={index === envList.length - 1}
+                                onClick={() => {
+                                  const newList = [...envList]
+                                  ;[newList[index], newList[index + 1]] = [newList[index + 1], newList[index]]
+                                  setEnvList(newList)
+                                }}
+                                aria-label="下移"
+                              >
+                                <ArrowDown className="h-4 w-4" />
+                              </Button>
+
+                              {isEditing ? (
+                                <>
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => {
+                                      const name = editingName.trim()
+                                      if (!name) return
+                                      setEnvList(envList.map((env, i) => i === index ? { ...env, envName: name } : env))
+                                      setEditingIndex(null)
+                                      setEditingName('')
+                                    }}
+                                  >
+                                    <Save className="h-4 w-4" />
+                                    保存
+                                  </Button>
+                                  <Button variant="ghost" size="sm" onClick={() => { setEditingIndex(null); setEditingName('') }}>
+                                    <X className="h-4 w-4" />
+                                    取消
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button variant="secondary" size="sm" onClick={() => { setEditingIndex(index); setEditingName(item.envName) }}>
+                                  <Pencil className="h-4 w-4" />
+                                  编辑
+                                </Button>
+                              )}
+
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
+                                onClick={() => setEnvList(envList.filter((_, i) => i !== index))}
+                                aria-label="删除"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">暂无环境配置</p>
+                  )}
+
+                  <div className="rounded-xl border border-dashed border-border p-4">
+                    <div className="text-sm font-medium text-foreground">新增环境</div>
+                    <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>环境编码 *</Label>
+                        <Input
+                          value={newEnvCode}
+                          onChange={(e) => setNewEnvCode(e.target.value)}
+                          placeholder="例如：uat"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>环境名称 *</Label>
+                        <Input
+                          value={newEnvName}
+                          onChange={(e) => setNewEnvName(e.target.value)}
+                          placeholder="例如：预发"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <Button
+                        variant="secondary"
+                        type="button"
+                        onClick={() => {
+                          const code = newEnvCode.trim().toLowerCase()
+                          const name = newEnvName.trim()
+                          if (!code) return
+                          if (envList.some(e => e.envCode === code)) return
+                          setEnvList([...envList, { envCode: code, envName: name || code }])
+                          setNewEnvCode('')
+                          setNewEnvName('')
+                        }}
+                      >
+                        <Plus className="h-4 w-4" />
+                        添加环境
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Button
+                    onClick={() => {
+                      const envValue = serializeEnvironmentOptions(envList)
+                      const merged = { ...settingForm, [SETTING_KEYS.ENVIRONMENT_OPTIONS]: envValue }
+                      setSettingForm(merged)
+                      const dataToSave: Record<string, string> = {}
+                      for (const [key, value] of Object.entries(merged)) {
+                        if (value && value.trim()) {
+                          dataToSave[key] = value
+                        }
+                      }
+                      if (Object.keys(dataToSave).length > 0) {
+                        updateSettingMutation.mutate(dataToSave)
+                      }
+                    }}
+                    disabled={updateSettingMutation.isPending}
+                  >
                     {updateSettingMutation.isPending ? '保存中...' : '保存设置'}
                   </Button>
                 </div>

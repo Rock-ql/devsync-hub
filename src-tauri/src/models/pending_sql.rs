@@ -18,40 +18,6 @@ pub struct PendingSql {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SqlEnvConfig {
-    pub id: i32,
-    pub project_id: i32,
-    pub env_code: String,
-    pub env_name: String,
-    pub sort_order: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SqlEnvConfigListReq {
-    pub project_id: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SqlEnvConfigAddReq {
-    pub project_id: i32,
-    pub env_code: String,
-    pub env_name: String,
-    #[serde(default)]
-    pub sort_order: Option<i32>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SqlEnvConfigUpdateReq {
-    pub id: i32,
-    #[serde(default)]
-    pub env_code: Option<String>,
-    #[serde(default)]
-    pub env_name: Option<String>,
-    #[serde(default)]
-    pub sort_order: Option<i32>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SqlExecutionLog {
     pub id: i32,
     pub sql_id: i32,

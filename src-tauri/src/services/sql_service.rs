@@ -212,118 +212,6 @@ pub fn revoke_execution(conn: &Connection, req: &SqlExecutionRevokeReq) -> AppRe
     Ok(())
 }
 
-pub fn list_sql_env_configs(conn: &Connection, project_id: i32) -> AppResult<Vec<SqlEnvConfig>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, project_id, env_code, env_name, sort_order FROM sql_env_config WHERE project_id = ? AND state = 1 AND deleted_at IS NULL ORDER BY sort_order ASC, id ASC"
-    )?;
-    let rows = stmt.query_map(params![project_id], |row| {
-        Ok(SqlEnvConfig {
-            id: row.get(0)?,
-            project_id: row.get(1)?,
-            env_code: row.get(2)?,
-            env_name: row.get(3)?,
-            sort_order: row.get(4)?,
-        })
-    })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
-}
-
-pub fn add_sql_env_config(conn: &Connection, req: &SqlEnvConfigAddReq) -> AppResult<i32> {
-    let env_code = req.env_code.trim();
-    if env_code.is_empty() {
-        return Err(AppError::BadRequest("env_code is required".into()));
-    }
-    let env_name = req.env_name.trim();
-    if env_name.is_empty() {
-        return Err(AppError::BadRequest("env_name is required".into()));
-    }
-
-    let dup: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sql_env_config WHERE project_id = ? AND env_code = ? AND state = 1 AND deleted_at IS NULL",
-        params![req.project_id, env_code],
-        |row| row.get(0),
-    )?;
-    if dup > 0 {
-        return Err(AppError::BadRequest(format!("env_code already exists: {}", env_code)));
-    }
-
-    let max_order: i32 = conn.query_row(
-        "SELECT COALESCE(MAX(sort_order), 0) FROM sql_env_config WHERE project_id = ? AND state = 1 AND deleted_at IS NULL",
-        params![req.project_id],
-        |row| row.get(0),
-    ).unwrap_or(0);
-    let sort_order = req.sort_order.unwrap_or(max_order + 1);
-
-    conn.execute(
-        "INSERT INTO sql_env_config (project_id, env_code, env_name, sort_order) VALUES (?, ?, ?, ?)",
-        params![req.project_id, env_code, env_name, sort_order],
-    )?;
-    Ok(conn.last_insert_rowid() as i32)
-}
-
-pub fn update_sql_env_config(conn: &Connection, req: &SqlEnvConfigUpdateReq) -> AppResult<()> {
-    let mut sets = vec![];
-    let mut pv: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
-
-    if let Some(v) = &req.env_code {
-        let trimmed = v.trim();
-        if trimmed.is_empty() {
-            return Err(AppError::BadRequest("env_code cannot be empty".into()));
-        }
-        // 检查 env_code 是否重复（同项目内）
-        let project_id: i32 = conn.query_row(
-            "SELECT project_id FROM sql_env_config WHERE id = ? AND state = 1 AND deleted_at IS NULL",
-            params![req.id],
-            |row| row.get(0),
-        ).unwrap_or(0);
-        if project_id > 0 {
-            let dup: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM sql_env_config WHERE project_id = ? AND env_code = ? AND id != ? AND state = 1 AND deleted_at IS NULL",
-                params![project_id, trimmed, req.id],
-                |row| row.get(0),
-            )?;
-            if dup > 0 {
-                return Err(AppError::BadRequest(format!("env_code already exists: {}", trimmed)));
-            }
-        }
-        sets.push("env_code = ?");
-        pv.push(Box::new(trimmed.to_string()));
-    }
-
-    if let Some(v) = &req.env_name {
-        let trimmed = v.trim();
-        if trimmed.is_empty() {
-            return Err(AppError::BadRequest("env_name cannot be empty".into()));
-        }
-        sets.push("env_name = ?");
-        pv.push(Box::new(trimmed.to_string()));
-    }
-
-    if let Some(v) = req.sort_order {
-        sets.push("sort_order = ?");
-        pv.push(Box::new(v));
-    }
-
-    if sets.is_empty() {
-        return Ok(());
-    }
-
-    sets.push("updated_at = datetime('now','localtime')");
-    pv.push(Box::new(req.id));
-    let sql = format!("UPDATE sql_env_config SET {} WHERE id = ? AND state = 1 AND deleted_at IS NULL", sets.join(", "));
-    let refs: Vec<&dyn rusqlite::types::ToSql> = pv.iter().map(|p| p.as_ref() as &dyn rusqlite::types::ToSql).collect();
-    conn.execute(&sql, refs.as_slice())?;
-    Ok(())
-}
-
-pub fn delete_sql_env_config(conn: &Connection, id: i32) -> AppResult<()> {
-    conn.execute(
-        "UPDATE sql_env_config SET deleted_at = datetime('now','localtime'), state = 0 WHERE id = ?",
-        params![id],
-    )?;
-    Ok(())
-}
-
 pub fn batch_delete_sql(conn: &Connection, req: &PendingSqlBatchDeleteReq) -> AppResult<()> {
     if req.ids.is_empty() {
         return Ok(());
@@ -361,13 +249,8 @@ fn enrich_sql(conn: &Connection, sql: PendingSql, status_filter: Option<&str>) -
         "SELECT name FROM iteration WHERE id = ?", params![sql.iteration_id], |row| row.get(0),
     ).unwrap_or_default();
 
-    // 获取环境配置
-    let mut env_stmt = conn.prepare(
-        "SELECT env_code, env_name FROM sql_env_config WHERE project_id = ? AND state = 1 ORDER BY sort_order"
-    )?;
-    let envs: Vec<(String, String)> = env_stmt.query_map(params![sql.project_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?.filter_map(|r| r.ok()).collect();
+    // 获取环境配置（从 system_setting 统一读取）
+    let envs = get_environment_options_from_setting(conn);
 
     // 获取执行日志
     let mut log_stmt = conn.prepare(
@@ -437,4 +320,79 @@ fn enrich_sql(conn: &Connection, sql: PendingSql, status_filter: Option<&str>) -
         completion_percent,
         linked_requirement: linked_req,
     }))
+}
+
+fn get_environment_options_from_setting(conn: &Connection) -> Vec<(String, String)> {
+    let raw: String = conn.query_row(
+        "SELECT setting_value FROM system_setting WHERE setting_key = 'work.environment.options'",
+        [],
+        |row| row.get(0),
+    ).unwrap_or_default();
+
+    let parsed = parse_environment_options_rust(&raw);
+    if parsed.is_empty() {
+        return default_environment_options();
+    }
+    parsed
+}
+
+fn parse_environment_options_rust(raw: &str) -> Vec<(String, String)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return vec![];
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut result = vec![];
+
+    for line in trimmed.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        // 查找英文冒号 ':' 或中文冒号 '：'
+        let en_idx = line.find(':');
+        let zh_idx = line.find('：');
+        let colon_idx = match (en_idx, zh_idx) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+
+        let (code, name) = match colon_idx {
+            Some(idx) if idx > 0 => {
+                let c = line[..idx].trim().to_lowercase();
+                let n = line[idx + line[idx..].chars().next().unwrap().len_utf8()..].trim();
+                if c.is_empty() {
+                    continue;
+                }
+                let name = if n.is_empty() { c.clone() } else { n.to_string() };
+                (c, name)
+            }
+            _ => {
+                let c = line.to_lowercase();
+                (c.clone(), c)
+            }
+        };
+
+        if seen.contains(&code) {
+            continue;
+        }
+        seen.insert(code.clone());
+        result.push((code, name));
+    }
+
+    result
+}
+
+fn default_environment_options() -> Vec<(String, String)> {
+    vec![
+        ("local".to_string(), "local".to_string()),
+        ("dev".to_string(), "dev".to_string()),
+        ("test".to_string(), "test".to_string()),
+        ("smoke".to_string(), "smoke".to_string()),
+        ("prod".to_string(), "prod".to_string()),
+    ]
 }

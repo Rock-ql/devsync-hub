@@ -59,26 +59,3 @@ pub async fn batch_delete_sql(state: State<'_, AppState>, req: PendingSqlBatchDe
     sql_service::batch_delete_sql(&db.conn, &req)
 }
 
-#[tauri::command]
-pub async fn list_sql_env_configs(state: State<'_, AppState>, req: SqlEnvConfigListReq) -> AppResult<Vec<SqlEnvConfig>> {
-    let db = state.db.lock().await;
-    sql_service::list_sql_env_configs(&db.conn, req.project_id)
-}
-
-#[tauri::command]
-pub async fn add_sql_env_config(state: State<'_, AppState>, req: SqlEnvConfigAddReq) -> AppResult<i32> {
-    let db = state.db.lock().await;
-    sql_service::add_sql_env_config(&db.conn, &req)
-}
-
-#[tauri::command]
-pub async fn update_sql_env_config(state: State<'_, AppState>, req: SqlEnvConfigUpdateReq) -> AppResult<()> {
-    let db = state.db.lock().await;
-    sql_service::update_sql_env_config(&db.conn, &req)
-}
-
-#[tauri::command]
-pub async fn delete_sql_env_config(state: State<'_, AppState>, id: i32) -> AppResult<()> {
-    let db = state.db.lock().await;
-    sql_service::delete_sql_env_config(&db.conn, id)
-}

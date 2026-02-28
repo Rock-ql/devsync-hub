@@ -240,7 +240,7 @@ export default function SqlManagement() {
 
   const buildEnvItems = (sql?: PendingSqlDetail | null): EnvExecutionItem[] => {
     const map = new Map((sql?.env_executions || []).map((item) => [item.env_code, item]))
-    const items = configuredEnvOptions.map((option) => {
+    return configuredEnvOptions.map((option) => {
       const existing = map.get(option.envCode)
       return {
         envCode: option.envCode,
@@ -251,22 +251,6 @@ export default function SqlManagement() {
         remark: existing?.remark ?? undefined,
       }
     })
-
-    for (const existing of sql?.env_executions || []) {
-      if (items.some((item) => item.envCode === existing.env_code)) {
-        continue
-      }
-      items.push({
-        envCode: existing.env_code,
-        envName: existing.env_name || existing.env_code,
-        executed: existing.executed,
-        executedAt: existing.executed_at ?? undefined,
-        executor: existing.executor ?? undefined,
-        remark: existing.remark ?? undefined,
-      })
-    }
-
-    return items
   }
 
   const handleOpenExecute = (sql: PendingSqlDetail, envCode?: string) => {
@@ -471,7 +455,6 @@ export default function SqlManagement() {
                         items={envItems}
                         executedCount={executedCount}
                         envTotal={envItems.length}
-                        showAddEnv={false}
                         onExecute={(envCode) => handleOpenExecute(sql, envCode)}
                         onDetail={(envCode) => {
                           const envExec = sql.env_executions?.find((item) => item.env_code === envCode)

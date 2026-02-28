@@ -68,10 +68,6 @@ pub fn run() {
             commands::sql_cmd::batch_execute_sql,
             commands::sql_cmd::batch_delete_sql,
             commands::sql_cmd::revoke_execution,
-            commands::sql_cmd::list_sql_env_configs,
-            commands::sql_cmd::add_sql_env_config,
-            commands::sql_cmd::update_sql_env_config,
-            commands::sql_cmd::delete_sql_env_config,
             // Report
             commands::report_cmd::list_reports,
             commands::report_cmd::get_report_detail,
