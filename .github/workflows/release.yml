@@ -86,6 +86,16 @@ jobs:
         with:
           name: release-notes
 
+      - name: Load release notes
+        id: release_notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<EOF'
+            cat release-notes.md
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -119,7 +129,7 @@ jobs:
         with:
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseName: 'DevSync Hub ${{ needs.prepare.outputs.tag }}'
-          releaseBodyPath: release-notes.md
+          releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true

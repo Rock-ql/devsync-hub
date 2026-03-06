@@ -143,7 +143,7 @@ export default function ConsolePage() {
           {hiddenCount > 0 ? (
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>已折叠较早的 {hiddenCount} 条日志，避免首屏阻塞</span>
-              <Button type="button" size="sm" variant="outline" onClick={handleLoadMore}>
+              <Button type="button" size="sm" variant="secondary" onClick={handleLoadMore}>
                 再加载 {Math.min(RENDER_STEP, hiddenCount)} 条
               </Button>
             </div>
