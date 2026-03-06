@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "devsync-hub"
-version = "2.0.9"
+version = "2.0.22"
 dependencies = [
  "axum",
  "axum-extra",
