@@ -3,6 +3,14 @@ import { create } from 'zustand'
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace'
 export type LogSource = 'frontend' | 'backend'
 
+export interface ConsoleLogInput {
+  source: LogSource
+  level: LogLevel
+  message: string
+  target?: string
+  timestamp?: string
+}
+
 export interface ConsoleLogEntry {
   id: number
   source: LogSource
@@ -13,6 +21,7 @@ export interface ConsoleLogEntry {
 }
 
 const MAX_LOG_ENTRIES = 2000
+let logSequence = 0
 
 function nowText() {
   const date = new Date()
@@ -57,8 +66,26 @@ interface ConsoleState {
   level: LogLevel
   logs: ConsoleLogEntry[]
   setConfig: (enabled: boolean, level: LogLevel) => void
-  addLog: (log: Omit<ConsoleLogEntry, 'id' | 'timestamp'> & Partial<Pick<ConsoleLogEntry, 'timestamp'>>) => void
+  addLog: (log: ConsoleLogInput) => void
+  addLogs: (logs: ConsoleLogInput[]) => void
   clearLogs: () => void
+}
+
+function createConsoleLogEntry(log: ConsoleLogInput): ConsoleLogEntry {
+  logSequence += 1
+
+  return {
+    id: logSequence,
+    source: log.source,
+    level: log.level,
+    message: log.message,
+    target: log.target,
+    timestamp: log.timestamp || nowText(),
+  }
+}
+
+function trimLogs(logs: ConsoleLogEntry[]): ConsoleLogEntry[] {
+  return logs.length > MAX_LOG_ENTRIES ? logs.slice(logs.length - MAX_LOG_ENTRIES) : logs
 }
 
 export const useConsoleStore = create<ConsoleState>()((set) => ({
@@ -68,17 +95,14 @@ export const useConsoleStore = create<ConsoleState>()((set) => ({
   setConfig: (enabled, level) => set({ enabled, level }),
   addLog: (log) =>
     set((state) => {
-      const nextLog: ConsoleLogEntry = {
-        id: Date.now() + Math.floor(Math.random() * 1000),
-        source: log.source,
-        level: log.level,
-        message: log.message,
-        target: log.target,
-        timestamp: log.timestamp || nowText(),
-      }
-      const nextLogs = [...state.logs, nextLog]
-      const sliced = nextLogs.length > MAX_LOG_ENTRIES ? nextLogs.slice(nextLogs.length - MAX_LOG_ENTRIES) : nextLogs
-      return { logs: sliced }
+      const nextLogs = [...state.logs, createConsoleLogEntry(log)]
+      return { logs: trimLogs(nextLogs) }
+    }),
+  addLogs: (logs) =>
+    set((state) => {
+      if (logs.length === 0) return state
+      const nextLogs = [...state.logs, ...logs.map(createConsoleLogEntry)]
+      return { logs: trimLogs(nextLogs) }
     }),
   clearLogs: () => set({ logs: [] }),
 }))

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -20,13 +20,14 @@ import { cn } from '@/lib/utils'
 import { useSSE } from '@/hooks/useSSE'
 import { toast } from '@/components/ui/toaster'
 import { buildSettingMap, settingApi } from '@/api/setting'
-import { normalizeLogLevel, useConsoleStore } from '@/stores/console'
+import { normalizeLogLevel, type ConsoleLogInput, useConsoleStore } from '@/stores/console'
 import { useUpdateStore } from '@/stores/update'
 import { UpdateDialog } from '@/components/update/UpdateDialog'
 
 const GITHUB_REPO_URL = 'https://github.com/Rock-ql/devsync-hub'
 const DEBUG_LOG_ENABLED_KEY = 'debug.log.enabled'
 const DEBUG_LOG_LEVEL_KEY = 'debug.log.level'
+const LOG_FLUSH_INTERVAL_MS = 120
 
 const navigation = [
   { name: '仪表盘', href: '/', icon: LayoutDashboard },
@@ -73,7 +74,10 @@ export default function Layout() {
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates)
   const loadCurrentVersion = useUpdateStore((state) => state.loadCurrentVersion)
   const setConsoleConfig = useConsoleStore((state) => state.setConfig)
-  const addConsoleLog = useConsoleStore((state) => state.addLog)
+  const addConsoleLogs = useConsoleStore((state) => state.addLogs)
+
+  const pendingConsoleLogsRef = useRef<ConsoleLogInput[]>([])
+  const flushTimerRef = useRef<number | null>(null)
 
   const { data: settingsMap } = useQuery({
     queryKey: ['settings', 'map'],
@@ -112,6 +116,19 @@ export default function Layout() {
     setConsoleConfig(enabled, level)
   }, [settingsMap, setConsoleConfig])
 
+  const flushPendingConsoleLogs = useCallback(() => {
+    flushTimerRef.current = null
+    if (pendingConsoleLogsRef.current.length === 0) return
+    addConsoleLogs(pendingConsoleLogsRef.current)
+    pendingConsoleLogsRef.current = []
+  }, [addConsoleLogs])
+
+  const enqueueConsoleLog = useCallback((log: ConsoleLogInput) => {
+    pendingConsoleLogsRef.current.push(log)
+    if (flushTimerRef.current !== null || typeof window === 'undefined') return
+    flushTimerRef.current = window.setTimeout(flushPendingConsoleLogs, LOG_FLUSH_INTERVAL_MS)
+  }, [flushPendingConsoleLogs])
+
   useSSE({
     events: ['project_sync', 'app_log'],
     onMessage: (eventName, data) => {
@@ -121,7 +138,7 @@ export default function Layout() {
           const level = normalizeLogLevel(String(payload.level || 'info'))
           const sourceText = String(payload.source || 'backend').toLowerCase()
           const source = sourceText === 'frontend' ? 'frontend' : 'backend'
-          addConsoleLog({
+          enqueueConsoleLog({
             source,
             level,
             target: String(payload.target || ''),
@@ -181,11 +198,17 @@ export default function Layout() {
   })
 
   useEffect(() => {
+    const syncToastMap = syncToastRef.current
+
     return () => {
-      syncToastRef.current.forEach((toastRef) => toastRef.dismiss())
-      syncToastRef.current.clear()
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current)
+      }
+      flushPendingConsoleLogs()
+      syncToastMap.forEach((toastRef) => toastRef.dismiss())
+      syncToastMap.clear()
     }
-  }, [])
+  }, [flushPendingConsoleLogs])
 
   useEffect(() => {
     let timer: number | null = null
