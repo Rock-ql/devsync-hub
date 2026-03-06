@@ -409,7 +409,6 @@ export default function Reports() {
     if (!selectedReport || deleteMutation.isPending) return
     const reportId = Number(selectedReport.id)
     if (!Number.isFinite(reportId) || reportId <= 0) { toast.error('报告ID无效'); return }
-    toast.success(`正在删除报告 #${reportId}`)
     deleteMutation.mutate(reportId)
   }
 

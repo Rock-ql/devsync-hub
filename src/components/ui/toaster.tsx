@@ -176,6 +176,7 @@ const toast = ((props: ToastInput) => createToast(props)) as ToastCreator
 
 toast.success = (message, options) =>
   createToast({
+    duration: 2500,
     ...options,
     title: options?.title ?? '成功',
     description: options?.description ?? message,
@@ -184,6 +185,7 @@ toast.success = (message, options) =>
 
 toast.error = (message, options) =>
   createToast({
+    duration: 4000,
     ...options,
     title: options?.title ?? '错误',
     description: options?.description ?? message,
