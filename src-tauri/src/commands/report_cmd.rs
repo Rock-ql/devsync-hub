@@ -1,5 +1,7 @@
 use tauri::State;
 use std::collections::HashSet;
+use std::time::Instant;
+use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use crate::AppState;
 use crate::error::AppResult;
@@ -8,6 +10,8 @@ use crate::models::common::PageResult;
 use crate::services::{project_service, report_service};
 use crate::clients::deepseek_client::DeepSeekClient;
 use crate::axum_gateway::sse;
+
+const PROJECT_SYNC_CONCURRENCY: usize = 3;
 
 #[derive(Debug, Serialize)]
 struct ReportGenerateSsePayload {
@@ -19,6 +23,15 @@ struct ReportGenerateSsePayload {
     message: String,
     percent: i32,
     status: String,
+}
+
+#[derive(Debug)]
+struct ProjectSyncOutcome {
+    project_id: i32,
+    project_name: String,
+    added_count: i32,
+    error: Option<String>,
+    elapsed_ms: u128,
 }
 
 fn report_mode(req: &ReportGenerateReq) -> &'static str {
@@ -44,7 +57,15 @@ fn emit_report_generate(req: &ReportGenerateReq, stage: &str, message: impl Into
     sse::publish("report_generate", &data);
 }
 
+fn report_sync_percent(completed: usize, total: usize) -> i32 {
+    if total == 0 {
+        return 60;
+    }
+    10 + ((completed as i32) * 45 / total as i32)
+}
+
 async fn sync_projects_before_daily_report(state: &AppState, req: &ReportGenerateReq) -> AppResult<()> {
+    let started_at = Instant::now();
     let selected_ids = req
         .project_ids
         .as_ref()
@@ -55,11 +76,6 @@ async fn sync_projects_before_daily_report(state: &AppState, req: &ReportGenerat
         let db = state.db.lock().await;
         project_service::list_all_projects(&db.conn)?
     };
-
-    let mut synced = 0;
-    let mut failed = 0;
-    let mut skipped = 0;
-    let mut total_added = 0;
 
     let target_projects: Vec<_> = projects
         .into_iter()
@@ -77,65 +93,125 @@ async fn sync_projects_before_daily_report(state: &AppState, req: &ReportGenerat
         return Ok(());
     }
 
-    for (index, project) in target_projects.into_iter().enumerate() {
-        let progress = 10 + ((index as i32) * 45 / total as i32);
+    let (active_projects, skipped_projects): (Vec<_>, Vec<_>) = target_projects
+        .into_iter()
+        .partition(|project| !project.gitlab_url.trim().is_empty());
+
+    let mut synced = 0;
+    let mut failed = 0;
+    let skipped = skipped_projects.len();
+    let mut total_added = 0;
+    let mut completed = skipped;
+
+    for project in &skipped_projects {
+        log::info!(
+            "[报告生成] 跳过项目同步（未配置 GitLab）: id={}, name={}",
+            project.id,
+            project.name
+        );
+    }
+
+    emit_report_generate(
+        req,
+        "sync",
+        format!(
+            "开始并发同步项目提交：总计 {}，跳过 {}，并发 {}",
+            total,
+            skipped,
+            PROJECT_SYNC_CONCURRENCY
+        ),
+        report_sync_percent(completed, total),
+        "running",
+    );
+
+    if active_projects.is_empty() {
+        log::info!(
+            "[报告生成] 日报生成前项目同步完成: synced=0, failed=0, skipped={}, total_added=0, elapsed_ms={}",
+            skipped,
+            started_at.elapsed().as_millis()
+        );
         emit_report_generate(
             req,
-            "sync",
-            format!("同步项目提交中：{}/{} {}", index + 1, total, project.name),
-            progress,
+            "sync_done",
+            format!("提交同步完成：成功 0，失败 0，跳过 {}，新增 0", skipped),
+            60,
             "running",
         );
+        return Ok(());
+    }
 
-        if project.gitlab_url.trim().is_empty() {
-            skipped += 1;
-            log::info!(
-                "[报告生成] 跳过项目同步（未配置 GitLab）: id={}, name={}",
-                project.id,
-                project.name
-            );
-            continue;
+    let mut sync_stream = stream::iter(active_projects.into_iter().map(|project| async move {
+        let item_started_at = Instant::now();
+        let project_id = project.id;
+        let project_name = project.name.clone();
+        match super::project_cmd::sync_project_commits_internal(state, project_id, false).await {
+            Ok(added_count) => ProjectSyncOutcome {
+                project_id,
+                project_name,
+                added_count,
+                error: None,
+                elapsed_ms: item_started_at.elapsed().as_millis(),
+            },
+            Err(err) => ProjectSyncOutcome {
+                project_id,
+                project_name,
+                added_count: 0,
+                error: Some(err.to_string()),
+                elapsed_ms: item_started_at.elapsed().as_millis(),
+            },
         }
+    }))
+    .buffer_unordered(PROJECT_SYNC_CONCURRENCY);
 
-        match super::project_cmd::sync_project_commits_internal(state, project.id, false).await {
-            Ok(added) => {
-                synced += 1;
-                total_added += added;
-            }
-            Err(err) => {
+    while let Some(outcome) = sync_stream.next().await {
+        completed += 1;
+        match outcome.error {
+            Some(err) => {
                 failed += 1;
                 log::warn!(
-                    "[报告生成] 项目同步失败，继续生成日报: id={}, name={}, err={}",
-                    project.id,
-                    project.name,
-                    err
+                    "[报告生成] 项目同步失败，继续生成日报: id={}, name={}, err={}, elapsed_ms={}",
+                    outcome.project_id,
+                    outcome.project_name,
+                    err,
+                    outcome.elapsed_ms
+                );
+            }
+            None => {
+                synced += 1;
+                total_added += outcome.added_count;
+                log::info!(
+                    "[报告生成] 项目同步完成: id={}, name={}, added_count={}, elapsed_ms={}",
+                    outcome.project_id,
+                    outcome.project_name,
+                    outcome.added_count,
+                    outcome.elapsed_ms
                 );
             }
         }
 
-        let progress = 10 + (((index + 1) as i32) * 45 / total as i32);
         emit_report_generate(
             req,
             "sync",
             format!(
                 "同步进度：{}/{}（新增 {}，失败 {}，跳过 {}）",
-                index + 1,
+                completed,
                 total,
                 total_added,
                 failed,
                 skipped
             ),
-            progress,
+            report_sync_percent(completed, total),
             "running",
         );
     }
 
     log::info!(
-        "[报告生成] 日报生成前项目同步完成: synced={}, failed={}, skipped={}, total_added={}",
+        "[报告生成] 日报生成前项目同步完成: synced={}, failed={}, skipped={}, total_added={}, elapsed_ms={}",
         synced,
         failed,
         skipped,
-        total_added
+        total_added,
+        started_at.elapsed().as_millis()
     );
     emit_report_generate(
         req,
@@ -170,7 +246,6 @@ pub async fn generate_report(state: State<'_, AppState>, req: ReportGenerateReq)
         "running",
     );
 
-    // 非强制生成：如果报告已存在则直接返回，避免重复生成
     if !req.force && !req.append_existing {
         let db = state.db.lock().await;
         if let Some(existing) = report_service::find_existing_report(&db.conn, &req)? {
@@ -192,7 +267,6 @@ pub async fn generate_report(state: State<'_, AppState>, req: ReportGenerateReq)
         }
     }
 
-    // Phase 1: Read all DB data (sync)
     emit_report_generate(&req, "prepare", "准备报告上下文...", 70, "running");
     let ctx = {
         let db = state.db.lock().await;
@@ -203,9 +277,8 @@ pub async fn generate_report(state: State<'_, AppState>, req: ReportGenerateReq)
                 return Err(err);
             }
         }
-    }; // DB lock dropped here
+    };
 
-    // Phase 2: Build content (async, no DB lock held)
     let content = if req.append_existing && req.r#type.eq_ignore_ascii_case("daily") {
         emit_report_generate(&req, "append", "正在基于现有日报补充新增提交...", 85, "running");
         report_service::generate_fallback(
@@ -246,7 +319,6 @@ pub async fn generate_report(state: State<'_, AppState>, req: ReportGenerateReq)
         )
     };
 
-    // Phase 3: Upsert report into DB (sync)
     emit_report_generate(&req, "save", "正在保存报告...", 95, "running");
     let db = state.db.lock().await;
     match report_service::generate_report_upsert(&db.conn, &req, &ctx, &content) {
@@ -262,7 +334,6 @@ pub async fn generate_report(state: State<'_, AppState>, req: ReportGenerateReq)
 }
 
 #[tauri::command]
-
 pub async fn update_report(state: State<'_, AppState>, req: ReportUpdateReq) -> AppResult<()> {
     let db = state.db.lock().await;
     report_service::update_report(&db.conn, &req)
@@ -278,4 +349,17 @@ pub async fn delete_report(state: State<'_, AppState>, id: i32) -> AppResult<()>
 pub async fn get_month_summary(state: State<'_, AppState>, req: ReportMonthSummaryReq) -> AppResult<MonthSummaryRsp> {
     let db = state.db.lock().await;
     report_service::get_month_summary(&db.conn, &req)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::report_sync_percent;
+
+    #[test]
+    fn report_sync_percent_scales_to_sync_stage_range() {
+        assert_eq!(report_sync_percent(0, 4), 10);
+        assert_eq!(report_sync_percent(2, 4), 32);
+        assert_eq!(report_sync_percent(4, 4), 55);
+        assert_eq!(report_sync_percent(0, 0), 60);
+    }
 }
