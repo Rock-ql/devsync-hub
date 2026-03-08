@@ -1584,6 +1584,21 @@ pub fn generate_fallback(
         }
     }
 
+    if report_type == "weekly" {
+        let mut content = String::from("## 本周工作总结\n\n");
+        let mut idx = 1;
+        for (project, msgs) in project_commits {
+            content.push_str(&format!("{}. {}\n", idx, project));
+            for (sub_idx, msg) in msgs.iter().enumerate() {
+                content.push_str(&format!("   {}. {}\n", sub_idx + 1, msg));
+            }
+            idx += 1;
+        }
+        content.push_str("\n## 下周工作计划\n\n");
+        content.push_str("（请根据本周工作内容补充下周计划）\n");
+        return content;
+    }
+
     let mut content = format!("# {}\n\n", type_label);
     for (project, msgs) in project_commits {
         content.push_str(&format!("## {}\n\n", project));
