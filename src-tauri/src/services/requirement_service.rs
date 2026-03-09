@@ -2,6 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{AppError, AppResult};
 use crate::models::requirement::*;
 use crate::models::common::PageResult;
+use crate::services::project_service;
 
 pub fn list_requirements(conn: &Connection, req: &RequirementListReq) -> AppResult<Vec<RequirementDetailRsp>> {
     let mut where_clause = "WHERE r.iteration_id = ? AND r.state = 1 AND r.deleted_at IS NULL".to_string();
@@ -212,6 +213,10 @@ pub fn list_requirement_commits(conn: &Connection, req: &RequirementCommitListRe
 }
 
 pub fn add_requirement(conn: &Connection, req: &RequirementAddReq) -> AppResult<i32> {
+    if let Some(project_ids) = &req.project_ids {
+        project_service::ensure_projects_enabled(conn, project_ids)?;
+    }
+
     let requirement_code = req
         .requirement_code
         .as_deref()
@@ -245,6 +250,10 @@ pub fn add_requirement(conn: &Connection, req: &RequirementAddReq) -> AppResult<
 }
 
 pub fn update_requirement(conn: &Connection, req: &RequirementUpdateReq) -> AppResult<()> {
+    if let Some(project_ids) = &req.project_ids {
+        project_service::ensure_projects_enabled(conn, project_ids)?;
+    }
+
     let mut sets = vec![];
     let mut pv: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
 

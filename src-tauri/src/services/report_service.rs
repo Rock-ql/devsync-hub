@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::report::*;
 use crate::models::common::PageResult;
 use crate::models::requirement::Requirement;
+use crate::services::project_service;
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
 use std::collections::{HashMap, HashSet};
 
@@ -97,6 +98,10 @@ pub struct GenerateReportContext {
 }
 
 pub fn generate_report_prepare(conn: &Connection, req: &ReportGenerateReq) -> AppResult<GenerateReportContext> {
+    if let Some(project_ids) = &req.project_ids {
+        project_service::ensure_projects_enabled(conn, project_ids)?;
+    }
+
     let type_label = if req.r#type == "daily" { "日报" } else { "周报" };
 
     let (structured_input, project_commits) = if req.r#type == "weekly" {
@@ -175,7 +180,7 @@ fn query_commits(conn: &Connection, req: &ReportGenerateReq) -> AppResult<Vec<Co
     let mut sql = "SELECT gc.id, gc.commit_id, gc.project_id, p.name, gc.message, gc.branch, gc.committed_at FROM git_commit gc \
         INNER JOIN project p ON gc.project_id = p.id \
         WHERE gc.state = 1 AND gc.deleted_at IS NULL \
-          AND p.state = 1 AND p.deleted_at IS NULL \
+          AND p.state = 1 AND p.deleted_at IS NULL AND p.enabled = 1 \
           AND SUBSTR(gc.committed_at, 1, 10) >= ? AND SUBSTR(gc.committed_at, 1, 10) <= ?"
         .to_string();
 
@@ -1595,7 +1600,9 @@ pub fn generate_fallback(
             idx += 1;
         }
         content.push_str("\n## 下周工作计划\n\n");
-        content.push_str("（请根据本周工作内容补充下周计划）\n");
+        content.push_str("1. 继续推进本周未完成的需求开发、联调与自测。\n");
+        content.push_str("2. 跟进待提测和测试反馈事项，完成问题修复与回归验证。\n");
+        content.push_str("3. 完成剩余收尾工作，推进上线或验收准备。\n");
         return content;
     }
 
@@ -1795,5 +1802,27 @@ mod tests {
         let ctx = generate_report_prepare(&conn, &req).expect("weekly prepare");
         assert!(ctx.structured_input.contains("## 项目A"));
         assert!(ctx.structured_input.contains("- 完成模块X"));
+    }
+
+    #[test]
+    fn weekly_fallback_uses_short_global_next_week_plan() {
+        let mut project_commits = HashMap::new();
+        project_commits.insert(
+            "项目A".to_string(),
+            vec!["完成功能X开发并联调通过".to_string()],
+        );
+
+        let content = generate_fallback("weekly", "## 项目A\n- 完成功能X开发并联调通过\n", &project_commits, "周报");
+        let next_week_section = content
+            .split("## 下周工作计划\n\n")
+            .nth(1)
+            .unwrap_or_default();
+
+        assert!(content.contains("## 本周工作总结"));
+        assert!(content.contains("## 下周工作计划"));
+        assert!(content.contains("1. 继续推进本周未完成的需求开发、联调与自测。"));
+        assert!(!content.contains("请根据本周工作内容补充下周计划"));
+        assert!(!next_week_section.contains("项目A"));
+        assert!(!next_week_section.contains("   1."));
     }
 }

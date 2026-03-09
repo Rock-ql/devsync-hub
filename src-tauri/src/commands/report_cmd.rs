@@ -66,6 +66,12 @@ fn report_sync_percent(completed: usize, total: usize) -> i32 {
 
 async fn sync_projects_before_daily_report(state: &AppState, req: &ReportGenerateReq) -> AppResult<()> {
     let started_at = Instant::now();
+
+    if let Some(project_ids) = &req.project_ids {
+        let db = state.db.lock().await;
+        project_service::ensure_projects_enabled(&db.conn, project_ids)?;
+    }
+
     let selected_ids = req
         .project_ids
         .as_ref()

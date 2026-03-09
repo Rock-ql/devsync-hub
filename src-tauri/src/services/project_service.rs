@@ -1,4 +1,4 @@
-use rusqlite::{params, params_from_iter, Connection};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use base64::Engine;
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
 use crate::error::{AppError, AppResult};
@@ -29,7 +29,7 @@ pub fn list_projects(conn: &Connection, req: &ProjectListReq) -> AppResult<PageR
     let total: i64 = conn.query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))?;
 
     let query_sql = format!(
-        "SELECT id, name, description, gitlab_url, gitlab_token, gitlab_project_id, gitlab_branch, state, created_at, updated_at FROM project {} ORDER BY id DESC LIMIT ? OFFSET ?",
+        "SELECT id, name, description, gitlab_url, gitlab_token, gitlab_project_id, gitlab_branch, enabled, state, created_at, updated_at FROM project {} ORDER BY id DESC LIMIT ? OFFSET ?",
         where_clause
     );
     let mut query_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
@@ -52,9 +52,10 @@ pub fn list_projects(conn: &Connection, req: &ProjectListReq) -> AppResult<PageR
             gitlab_token: row.get(4)?,
             gitlab_project_id: row.get(5)?,
             gitlab_branch: row.get(6)?,
-            state: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            enabled: row.get(7)?,
+            state: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
         })
     })?;
 
@@ -64,7 +65,7 @@ pub fn list_projects(conn: &Connection, req: &ProjectListReq) -> AppResult<PageR
 
 pub fn list_all_projects(conn: &Connection) -> AppResult<Vec<Project>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, gitlab_url, gitlab_token, gitlab_project_id, gitlab_branch, state, created_at, updated_at FROM project WHERE state = 1 AND deleted_at IS NULL ORDER BY id DESC"
+        "SELECT id, name, description, gitlab_url, gitlab_token, gitlab_project_id, gitlab_branch, enabled, state, created_at, updated_at FROM project WHERE state = 1 AND deleted_at IS NULL AND enabled = 1 ORDER BY id DESC"
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(Project {
@@ -75,9 +76,10 @@ pub fn list_all_projects(conn: &Connection) -> AppResult<Vec<Project>> {
             gitlab_token: row.get(4)?,
             gitlab_project_id: row.get(5)?,
             gitlab_branch: row.get(6)?,
-            state: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            enabled: row.get(7)?,
+            state: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -85,7 +87,7 @@ pub fn list_all_projects(conn: &Connection) -> AppResult<Vec<Project>> {
 
 pub fn get_project_detail(conn: &Connection, id: i32) -> AppResult<ProjectDetailRsp> {
     let project = conn.query_row(
-        "SELECT id, name, description, gitlab_url, gitlab_token, gitlab_project_id, gitlab_branch, state, created_at, updated_at FROM project WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+        "SELECT id, name, description, gitlab_url, gitlab_token, gitlab_project_id, gitlab_branch, enabled, state, created_at, updated_at FROM project WHERE id = ? AND state = 1 AND deleted_at IS NULL",
         params![id],
         |row| Ok(Project {
             id: row.get(0)?,
@@ -95,9 +97,10 @@ pub fn get_project_detail(conn: &Connection, id: i32) -> AppResult<ProjectDetail
             gitlab_token: row.get(4)?,
             gitlab_project_id: row.get(5)?,
             gitlab_branch: row.get(6)?,
-            state: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            enabled: row.get(7)?,
+            state: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
         }),
     ).map_err(|_| AppError::NotFound("Project not found".into()))?;
 
@@ -114,6 +117,45 @@ pub fn get_project_detail(conn: &Connection, id: i32) -> AppResult<ProjectDetail
     let has_gitlab_config = !project.gitlab_url.trim().is_empty();
 
     Ok(ProjectDetailRsp { project, iteration_count, pending_sql_count, has_gitlab_config })
+}
+
+pub fn update_project_enabled(conn: &Connection, req: &ProjectEnabledUpdateReq) -> AppResult<()> {
+    let affected = conn.execute(
+        "UPDATE project SET enabled = ?, updated_at = datetime('now','localtime') WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+        params![if req.enabled { 1 } else { 0 }, req.id],
+    )?;
+
+    if affected == 0 {
+        return Err(AppError::NotFound("Project not found".into()));
+    }
+
+    Ok(())
+}
+
+pub fn ensure_project_enabled(conn: &Connection, project_id: i32) -> AppResult<()> {
+    let project = conn
+        .query_row(
+            "SELECT name, enabled FROM project WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+            params![project_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?)),
+        )
+        .optional()?;
+
+    match project {
+        Some((name, enabled)) if enabled == 1 => Ok(()),
+        Some((name, _)) => Err(AppError::BadRequest(format!("项目“{}”已被禁用，不能继续使用", name))),
+        None => Err(AppError::BadRequest(format!("项目不存在或已删除: {}", project_id))),
+    }
+}
+
+pub fn ensure_projects_enabled(conn: &Connection, project_ids: &[i32]) -> AppResult<()> {
+    let mut checked = std::collections::HashSet::new();
+    for project_id in project_ids {
+        if checked.insert(*project_id) {
+            ensure_project_enabled(conn, *project_id)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn add_project(conn: &Connection, req: &ProjectAddReq) -> AppResult<i32> {
@@ -314,6 +356,9 @@ fn soft_delete_commits(conn: &Connection, commit_ids: &[i32]) -> AppResult<()> {
 /// Prepare sync data needed for sync_commits (before async calls)
 pub fn sync_commits_prepare(conn: &Connection, id: i32) -> AppResult<(String, String, i32, String, String)> {
     let project = get_project_detail(conn, id)?.project;
+    if project.enabled != 1 {
+        return Err(AppError::BadRequest(format!("项目“{}”已被禁用，不能同步提交", project.name)));
+    }
     if project.gitlab_url.trim().is_empty() {
         return Err(AppError::BadRequest("GitLab repository URL not configured".into()));
     }

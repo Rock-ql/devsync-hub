@@ -12,6 +12,7 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
             gitlab_token TEXT NOT NULL DEFAULT '',
             gitlab_project_id INTEGER NOT NULL DEFAULT 0,
             gitlab_branch TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
             state INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -212,6 +213,8 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
         );
     ")?;
 
+    ensure_column_exists(conn, "project", "enabled", "ALTER TABLE project ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")?;
+
     // 清理 git_commit 重复数据并建立唯一索引（按 commit SHA 去重，不区分分支）
     conn.execute_batch("
         DROP INDEX IF EXISTS uk_git_commit_project_commit_branch;
@@ -248,6 +251,19 @@ pub fn run_migrations(conn: &Connection) -> AppResult<()> {
         CREATE INDEX IF NOT EXISTS idx_req_status_log_requirement_id ON requirement_status_log(requirement_id);
         CREATE INDEX IF NOT EXISTS idx_req_status_log_changed_at ON requirement_status_log(changed_at);
     ")?;
+
+    Ok(())
+}
+
+fn ensure_column_exists(conn: &Connection, table_name: &str, column_name: &str, alter_sql: &str) -> AppResult<()> {
+    let pragma_sql = format!("PRAGMA table_info({})", table_name);
+    let mut stmt = conn.prepare(&pragma_sql)?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let exists = rows.filter_map(|row| row.ok()).any(|name| name == column_name);
+
+    if !exists {
+        conn.execute(alter_sql, [])?;
+    }
 
     Ok(())
 }

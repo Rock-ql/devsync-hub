@@ -2,6 +2,7 @@ use rusqlite::{params, params_from_iter, Connection};
 use crate::error::{AppError, AppResult};
 use crate::models::iteration::*;
 use crate::models::common::PageResult;
+use crate::services::project_service;
 
 pub fn list_iterations(conn: &Connection, req: &IterationListReq) -> AppResult<PageResult<IterationDetailRsp>> {
     let page = req.page.unwrap_or(1);
@@ -103,6 +104,10 @@ pub fn add_iteration(conn: &Connection, req: &IterationAddReq) -> AppResult<i32>
     let end_date = req.end_date.as_deref().unwrap_or("").trim().to_string();
     validate_date_range(&start_date, &end_date)?;
 
+    if let Some(project_ids) = &req.project_ids {
+        project_service::ensure_projects_enabled(conn, project_ids)?;
+    }
+
     conn.execute(
         "INSERT INTO iteration (name, description, status, start_date, end_date) VALUES (?, ?, ?, ?, ?)",
         params![
@@ -127,6 +132,10 @@ pub fn add_iteration(conn: &Connection, req: &IterationAddReq) -> AppResult<i32>
 }
 
 pub fn update_iteration(conn: &Connection, req: &IterationUpdateReq) -> AppResult<()> {
+    if let Some(project_ids) = &req.project_ids {
+        project_service::ensure_projects_enabled(conn, project_ids)?;
+    }
+
     if req.start_date.is_some() || req.end_date.is_some() {
         let (current_start, current_end): (String, String) = conn
             .query_row(

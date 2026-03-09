@@ -396,6 +396,12 @@ pub async fn update_project(state: State<'_, AppState>, req: ProjectUpdateReq) -
 }
 
 #[tauri::command]
+pub async fn update_project_enabled(state: State<'_, AppState>, req: ProjectEnabledUpdateReq) -> AppResult<()> {
+    let db = state.db.lock().await;
+    project_service::update_project_enabled(&db.conn, &req)
+}
+
+#[tauri::command]
 pub async fn delete_project(state: State<'_, AppState>, id: i32) -> AppResult<()> {
     let db = state.db.lock().await;
     project_service::delete_project(&db.conn, id)

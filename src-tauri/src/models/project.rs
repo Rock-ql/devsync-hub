@@ -9,6 +9,7 @@ pub struct Project {
     pub gitlab_token: String,
     pub gitlab_project_id: i32,
     pub gitlab_branch: String,
+    pub enabled: i32,
     pub state: i32,
     pub created_at: String,
     pub updated_at: String,
@@ -63,6 +64,12 @@ pub struct ProjectDetailRsp {
     pub iteration_count: i64,
     pub pending_sql_count: i64,
     pub has_gitlab_config: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProjectEnabledUpdateReq {
+    pub id: i32,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

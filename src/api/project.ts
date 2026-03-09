@@ -8,6 +8,7 @@ export interface Project {
   gitlab_token: string;
   gitlab_project_id: number;
   gitlab_branch: string;
+  enabled: number;
   state: number;
   created_at: string;
   updated_at: string;
@@ -21,6 +22,7 @@ export interface ProjectDetail {
   gitlab_token: string;
   gitlab_project_id: number;
   gitlab_branch: string;
+  enabled: number;
   state: number;
   created_at: string;
   updated_at: string;
@@ -53,6 +55,8 @@ export const projectApi = {
     invoke<number>("add_project", { req: data }),
   update: (data: Partial<Project> & { id: number }) =>
     invoke<void>("update_project", { req: data }),
+  updateEnabled: (id: number, enabled: boolean) =>
+    invoke<void>("update_project_enabled", { req: { id, enabled } }),
   delete: (id: number) =>
     invoke<void>("delete_project", { id }),
   syncCommits: (id: number) =>

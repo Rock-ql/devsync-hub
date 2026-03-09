@@ -36,6 +36,7 @@ pub fn run() {
             commands::project_cmd::get_project_detail,
             commands::project_cmd::add_project,
             commands::project_cmd::update_project,
+            commands::project_cmd::update_project_enabled,
             commands::project_cmd::delete_project,
             commands::project_cmd::sync_commits,
             commands::project_cmd::get_commits,

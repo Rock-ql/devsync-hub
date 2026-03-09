@@ -2,6 +2,7 @@ use rusqlite::{params, Connection};
 use crate::error::{AppError, AppResult};
 use crate::models::pending_sql::*;
 use crate::models::common::PageResult;
+use crate::services::project_service;
 
 pub fn list_sql(conn: &Connection, req: &PendingSqlListReq) -> AppResult<PageResult<PendingSqlDetailRsp>> {
     let page = req.page.unwrap_or(1);
@@ -80,6 +81,8 @@ pub fn get_sql_detail(conn: &Connection, id: i32) -> AppResult<PendingSqlDetailR
 }
 
 pub fn add_sql(conn: &Connection, req: &PendingSqlAddReq) -> AppResult<i32> {
+    project_service::ensure_project_enabled(conn, req.project_id)?;
+
     let title = req.title.trim();
     if title.is_empty() {
         return Err(AppError::BadRequest("sql title cannot be empty".into()));

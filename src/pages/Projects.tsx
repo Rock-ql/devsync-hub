@@ -123,6 +123,8 @@ export default function Projects() {
     return options
   }, [branchQuery.data, formData.gitlab_branch, canFetchBranches])
 
+  const isProjectEnabled = (project?: Pick<Project, 'enabled'> | Pick<ProjectDetail, 'enabled'> | null) => project?.enabled !== 0
+
   // --- Mutations ---
   const addMutation = useMutation({
     mutationFn: (data: typeof formData) => projectApi.add({
@@ -131,6 +133,7 @@ export default function Projects() {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['projects-all'] })
       store.getState().closeModal()
       store.getState().resetForm()
     },
@@ -143,6 +146,7 @@ export default function Projects() {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['projects-all'] })
       store.getState().closeModal()
       store.getState().resetForm()
     },
@@ -152,6 +156,26 @@ export default function Projects() {
     mutationFn: (id: number) => projectApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['projects-all'] })
+    },
+  })
+
+  const toggleEnabledMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => projectApi.updateEnabled(id, enabled),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['projects-all'] })
+      const currentSelected = useProjectStore.getState().selectedProject
+      if (currentSelected?.id === variables.id) {
+        useProjectStore.getState().setSelectedProject({
+          ...currentSelected,
+          enabled: variables.enabled ? 1 : 0,
+        })
+      }
+      toast.success(variables.enabled ? '项目已启用' : '项目已禁用')
+    },
+    onError: (error: unknown) => {
+      toast.error(`操作失败：${error instanceof Error ? error.message : String(error)}`)
     },
   })
 
@@ -203,6 +227,20 @@ export default function Projects() {
     )
   }
 
+  const requestToggleProjectEnabled = (project: Project | ProjectDetail) => {
+    const nextEnabled = !isProjectEnabled(project)
+    openConfirm(
+      {
+        title: nextEnabled ? '启用项目？' : '禁用项目？',
+        description: nextEnabled
+          ? `确认启用项目「${project.name}」吗？启用后可重新参与绑定和日报同步。`
+          : `确认禁用项目「${project.name}」吗？历史数据会保留，但该项目将不能再用于绑定和日报同步。`,
+        confirmText: nextEnabled ? '启用' : '禁用',
+      },
+      () => toggleEnabledMutation.mutate({ id: project.id, enabled: nextEnabled }),
+    )
+  }
+
   const formatCommitDate = (dateStr: string) => {
     const date = new Date(dateStr)
     return date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -240,7 +278,7 @@ export default function Projects() {
           data.records.map((project) => (
             <Card
               key={project.id}
-              className="cursor-pointer transition-all hover:shadow-xl"
+              className={`cursor-pointer transition-all hover:shadow-xl ${isProjectEnabled(project) ? "" : "opacity-80"}`}
               onClick={() => {
                 projectApi.detail(project.id).then((detail) => {
                   store.getState().openDetail(detail)
@@ -276,6 +314,7 @@ export default function Projects() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap gap-2">
+                  <Badge tone={isProjectEnabled(project) ? 'success' : 'warning'} variant="soft">{isProjectEnabled(project) ? '已启用' : '已禁用'}</Badge>
                   <Badge tone="info" variant="soft">{project.iteration_count ?? 0} 个迭代</Badge>
                   {(project.pending_sql_count ?? 0) > 0 ? (
                     <Badge tone="warning" variant="soft">{project.pending_sql_count ?? 0} 条执行事项待处理</Badge>
@@ -286,13 +325,18 @@ export default function Projects() {
                     <Badge tone="accent" variant="outline">GitLab 已连接</Badge>
                   )}
                 </div>
+                <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                  <Button variant="secondary" size="sm" onClick={() => requestToggleProjectEnabled(project)} disabled={toggleEnabledMutation.isPending}>
+                    {isProjectEnabled(project) ? '禁用项目' : '启用项目'}
+                  </Button>
+                </div>
                 {Boolean(project.gitlab_url?.trim()) && (
                   <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/40 px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <GitBranch className="h-4 w-4" />
                       <span>{project.gitlab_branch}</span>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => syncMutation.mutate(project.id)} disabled={syncingProjectId === project.id}>
+                    <Button variant="ghost" size="sm" onClick={() => syncMutation.mutate(project.id)} disabled={syncingProjectId === project.id || !isProjectEnabled(project)}>
                       {syncingProjectId === project.id ? '同步中...' : '同步提交'}
                     </Button>
                   </div>
@@ -369,13 +413,25 @@ export default function Projects() {
             <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => store.getState().closeDetail()}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
-            <SheetTitle className="flex-1 truncate">{selectedProject?.name || '项目详情'}</SheetTitle>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <SheetTitle className="truncate">{selectedProject?.name || '项目详情'}</SheetTitle>
+              {selectedProject && (
+                <Badge tone={isProjectEnabled(selectedProject) ? 'success' : 'warning'} variant="soft">
+                  {isProjectEnabled(selectedProject) ? '已启用' : '已禁用'}
+                </Badge>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => { if (selectedProject) handleEdit(selectedProject) }} aria-label="编辑项目">
                 <Pencil className="h-4 w-4" />
               </Button>
+              {selectedProject && (
+                <Button variant="secondary" size="sm" onClick={() => requestToggleProjectEnabled(selectedProject)} disabled={toggleEnabledMutation.isPending}>
+                  {isProjectEnabled(selectedProject) ? '禁用项目' : '启用项目'}
+                </Button>
+              )}
               {Boolean(selectedProject?.gitlab_url?.trim()) && (
-                <Button variant="secondary" size="sm" onClick={() => { if (selectedProject) syncMutation.mutate(selectedProject.id) }} disabled={syncingProjectId === selectedProject?.id}>
+                <Button variant="secondary" size="sm" onClick={() => { if (selectedProject) syncMutation.mutate(selectedProject.id) }} disabled={syncingProjectId === selectedProject?.id || !isProjectEnabled(selectedProject)}>
                   {syncingProjectId === selectedProject?.id ? '同步中...' : '同步提交'}
                 </Button>
               )}
@@ -394,6 +450,7 @@ export default function Projects() {
               <div className="space-y-3">
                 <h3 className="text-sm font-medium text-muted-foreground">基本信息</h3>
                 <div className="rounded-xl border border-border/60 bg-muted/40 p-4 space-y-2 text-sm">
+                  <p><span className="text-muted-foreground">状态：</span>{isProjectEnabled(selectedProject) ? '已启用' : '已禁用'}</p>
                   <p><span className="text-muted-foreground">描述：</span>{selectedProject?.description || '暂无描述'}</p>
                   {selectedProject?.gitlab_url && <p><span className="text-muted-foreground">GitLab：</span>{selectedProject.gitlab_url}</p>}
                   {selectedProject?.gitlab_branch && <p><span className="text-muted-foreground">分支：</span>{selectedProject.gitlab_branch}</p>}
