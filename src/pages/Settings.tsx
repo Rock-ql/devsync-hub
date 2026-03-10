@@ -784,7 +784,7 @@ export default function Settings() {
                       placeholder="请输入周报模板..."
                     />
                     <p className="text-xs text-muted-foreground">
-                      支持变量：{'{title}'}、{'{commits}'}、{'{startDate}'}/{'{endDate}'}；标题可用首行“# 标题”或“标题：”指定；模板包含“按项目/序号/简要/详细”等关键词会影响生成规则
+                      支持变量：{'{title}'}、{'{commits}'}、{'{startDate}'}/{'{endDate}'}；标题可用首行“# 标题”或“标题：”指定；模板包含“按项目/序号/简要/详细”等关键词会影响生成规则；下周工作计划默认压缩为 2-4 条简短计划，不会按本周内容逐条展开
                     </p>
                   </div>
                   <Button onClick={handleSaveSettings} disabled={updateSettingMutation.isPending}>

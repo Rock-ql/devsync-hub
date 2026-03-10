@@ -4,7 +4,7 @@ import { PageResult } from '@/api'
 import { projectApi, Project, ProjectDetail, GitCommit } from '@/api/project'
 import { iterationApi, IterationDetail } from '@/api/iteration'
 import { sqlApi, PendingSqlDetail } from '@/api/sql'
-import { Plus, Pencil, Trash2, GitBranch, ArrowLeft } from 'lucide-react'
+import { Plus, Pencil, Trash2, GitBranch, ArrowLeft, Power, PowerOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -304,6 +304,17 @@ export default function Projects() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    className={`h-9 w-9 p-0 ${isProjectEnabled(project) ? 'text-muted-foreground hover:text-orange-500' : 'text-orange-500 hover:text-green-600'}`}
+                    onClick={() => requestToggleProjectEnabled(project)}
+                    disabled={toggleEnabledMutation.isPending}
+                    aria-label={isProjectEnabled(project) ? '禁用项目' : '启用项目'}
+                    title={isProjectEnabled(project) ? '禁用项目' : '启用项目'}
+                  >
+                    {isProjectEnabled(project) ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     className="h-9 w-9 p-0 text-muted-foreground hover:text-red-600"
                     onClick={() => requestDeleteProject(project)}
                     aria-label="删除项目"
@@ -324,11 +335,6 @@ export default function Projects() {
                   {Boolean(project.gitlab_url?.trim()) && (
                     <Badge tone="accent" variant="outline">GitLab 已连接</Badge>
                   )}
-                </div>
-                <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-                  <Button variant="secondary" size="sm" onClick={() => requestToggleProjectEnabled(project)} disabled={toggleEnabledMutation.isPending}>
-                    {isProjectEnabled(project) ? '禁用项目' : '启用项目'}
-                  </Button>
                 </div>
                 {Boolean(project.gitlab_url?.trim()) && (
                   <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/40 px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -426,8 +432,16 @@ export default function Projects() {
                 <Pencil className="h-4 w-4" />
               </Button>
               {selectedProject && (
-                <Button variant="secondary" size="sm" onClick={() => requestToggleProjectEnabled(selectedProject)} disabled={toggleEnabledMutation.isPending}>
-                  {isProjectEnabled(selectedProject) ? '禁用项目' : '启用项目'}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`h-9 w-9 p-0 ${isProjectEnabled(selectedProject) ? 'text-muted-foreground hover:text-orange-500' : 'text-orange-500 hover:text-green-600'}`}
+                  onClick={() => requestToggleProjectEnabled(selectedProject)}
+                  disabled={toggleEnabledMutation.isPending}
+                  aria-label={isProjectEnabled(selectedProject) ? '禁用项目' : '启用项目'}
+                  title={isProjectEnabled(selectedProject) ? '禁用项目' : '启用项目'}
+                >
+                  {isProjectEnabled(selectedProject) ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
                 </Button>
               )}
               {Boolean(selectedProject?.gitlab_url?.trim()) && (
