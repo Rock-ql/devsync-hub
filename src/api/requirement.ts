@@ -51,6 +51,11 @@ export interface RequirementLinkPayload {
   link_id: number;
 }
 
+export interface RequirementMigratePayload {
+  requirement_ids: number[];
+  target_iteration_id: number;
+}
+
 export interface RequirementCommitItem {
   id: number;
   project_id: number;
@@ -92,4 +97,6 @@ export const requirementApi = {
     invoke<void>("link_requirement", { req: payload }),
   linked: (linkType: string, linkId: number) =>
     invoke<RequirementItem | null>("get_linked_requirement", { linkType, linkId }),
+  migrate: (payload: RequirementMigratePayload) =>
+    invoke<void>("migrate_requirements", { req: payload }),
 };

@@ -91,6 +91,12 @@ pub struct RequirementDeleteReq {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct RequirementMigrateReq {
+    pub requirement_ids: Vec<i32>,
+    pub target_iteration_id: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RequirementLinkReq {
     pub requirement_id: i32,
     pub link_type: String,

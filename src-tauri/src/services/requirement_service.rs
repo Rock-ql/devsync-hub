@@ -323,6 +323,111 @@ pub fn delete_requirement(conn: &Connection, id: i32) -> AppResult<()> {
     Ok(())
 }
 
+pub fn migrate_requirements(conn: &Connection, req: &RequirementMigrateReq) -> AppResult<()> {
+    if req.requirement_ids.is_empty() {
+        return Ok(());
+    }
+
+    // 校验目标迭代存在且未上线
+    let target_status: String = conn.query_row(
+        "SELECT status FROM iteration WHERE id = ? AND state = 1 AND deleted_at IS NULL",
+        params![req.target_iteration_id],
+        |row| row.get(0),
+    ).map_err(|_| AppError::NotFound("目标迭代不存在".into()))?;
+
+    if target_status == "released" {
+        return Err(AppError::BadRequest("目标迭代已上线，无法迁入需求".into()));
+    }
+
+    // 校验所有需求存在且不在目标迭代中
+    let placeholders: Vec<&str> = req.requirement_ids.iter().map(|_| "?").collect();
+    let in_clause = placeholders.join(",");
+
+    let sql = format!(
+        "SELECT id, iteration_id, requirement_code FROM requirement WHERE id IN ({}) AND state = 1 AND deleted_at IS NULL",
+        in_clause
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = req.requirement_ids.iter().map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>).collect();
+    let refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref() as &dyn rusqlite::types::ToSql).collect();
+
+    let rows: Vec<(i32, i32, String)> = stmt.query_map(refs.as_slice(), |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get::<_, String>(2)?))
+    })?.filter_map(|r| r.ok()).collect();
+
+    if rows.len() != req.requirement_ids.len() {
+        return Err(AppError::BadRequest("部分需求不存在".into()));
+    }
+
+    for (_, iter_id, _) in &rows {
+        if *iter_id == req.target_iteration_id {
+            return Err(AppError::BadRequest("部分需求已在目标迭代中".into()));
+        }
+    }
+
+    // 检查非空 requirement_code 在目标迭代中的唯一性
+    let codes: Vec<&str> = rows.iter()
+        .map(|(_, _, code)| code.trim())
+        .filter(|c| !c.is_empty())
+        .collect();
+
+    if !codes.is_empty() {
+        let code_placeholders: Vec<&str> = codes.iter().map(|_| "?").collect();
+        let code_in = code_placeholders.join(",");
+        let check_sql = format!(
+            "SELECT TRIM(requirement_code) FROM requirement WHERE iteration_id = ? AND state = 1 AND deleted_at IS NULL AND TRIM(requirement_code) IN ({})",
+            code_in
+        );
+        let mut check_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(req.target_iteration_id)];
+        for code in &codes {
+            check_params.push(Box::new(code.to_string()));
+        }
+        let check_refs: Vec<&dyn rusqlite::types::ToSql> = check_params.iter().map(|p| p.as_ref() as &dyn rusqlite::types::ToSql).collect();
+
+        let mut check_stmt = conn.prepare(&check_sql)?;
+        let conflicts: Vec<String> = check_stmt.query_map(check_refs.as_slice(), |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if !conflicts.is_empty() {
+            return Err(AppError::BadRequest(format!(
+                "需求编号 {} 在目标迭代中已存在", conflicts.join(", ")
+            )));
+        }
+    }
+
+    // 批量更新 requirement 的 iteration_id
+    let update_sql = format!(
+        "UPDATE requirement SET iteration_id = ?, updated_at = datetime('now','localtime') WHERE id IN ({}) AND state = 1",
+        in_clause
+    );
+    let mut update_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(req.target_iteration_id)];
+    for id in &req.requirement_ids {
+        update_params.push(Box::new(*id));
+    }
+    let update_refs: Vec<&dyn rusqlite::types::ToSql> = update_params.iter().map(|p| p.as_ref() as &dyn rusqlite::types::ToSql).collect();
+    conn.execute(&update_sql, update_refs.as_slice())?;
+
+    // 同步迁移关联 SQL 的 iteration_id
+    let sql_update = format!(
+        "UPDATE pending_sql SET iteration_id = ?, updated_at = datetime('now','localtime') \
+         WHERE id IN ( \
+           SELECT wil.link_id FROM work_item_link wil \
+           WHERE wil.work_item_id IN ({}) AND wil.link_type = 'sql' AND wil.state = 1 \
+         ) AND state = 1",
+        in_clause
+    );
+    let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(req.target_iteration_id)];
+    for id in &req.requirement_ids {
+        sql_params.push(Box::new(*id));
+    }
+    let sql_refs: Vec<&dyn rusqlite::types::ToSql> = sql_params.iter().map(|p| p.as_ref() as &dyn rusqlite::types::ToSql).collect();
+    conn.execute(&sql_update, sql_refs.as_slice())?;
+
+    log::info!("[需求迁移] ids={:?}, target_iteration_id={}", req.requirement_ids, req.target_iteration_id);
+    Ok(())
+}
+
 fn ensure_requirement_code_unique(
     conn: &Connection,
     iteration_id: i32,

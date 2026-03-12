@@ -59,6 +59,7 @@ pub fn run() {
             commands::requirement_cmd::delete_requirement,
             commands::requirement_cmd::link_requirement,
             commands::requirement_cmd::get_linked_requirement,
+            commands::requirement_cmd::migrate_requirements,
             // SQL
             commands::sql_cmd::list_sql,
             commands::sql_cmd::get_sql_detail,

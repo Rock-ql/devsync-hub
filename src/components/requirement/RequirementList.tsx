@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PageResult } from '@/api'
-import { Link2, Pencil, Plus, Trash2, GitBranch } from 'lucide-react'
+import { Link2, Pencil, Plus, Trash2, GitBranch, MoveRight } from 'lucide-react'
 import { requirementApi, RequirementItem } from '@/api/requirement'
 import RequirementDialog from '@/components/requirement/RequirementDialog'
 import RequirementCommitsDialog from '@/components/requirement/RequirementCommitsDialog'
+import RequirementMigrateDialog from '@/components/requirement/RequirementMigrateDialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -44,6 +45,7 @@ export default function RequirementList({ iterationId, iterationName, projects }
   const [commitsDialogOpen, setCommitsDialogOpen] = useState(false)
   const [commitsRequirement, setCommitsRequirement] = useState<RequirementItem | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<RequirementItem | null>(null)
+  const [migrateTarget, setMigrateTarget] = useState<RequirementItem | null>(null)
   const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
 
@@ -198,6 +200,9 @@ export default function RequirementList({ iterationId, iterationName, projects }
                   <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEdit(item)}>
                     <Pencil className="h-4 w-4" />
                   </Button>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setMigrateTarget(item)} title="迁移到其他迭代">
+                    <MoveRight className="h-4 w-4" />
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
@@ -334,6 +339,16 @@ export default function RequirementList({ iterationId, iterationName, projects }
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {migrateTarget && (
+        <RequirementMigrateDialog
+          open={!!migrateTarget}
+          onOpenChange={(open) => { if (!open) setMigrateTarget(null) }}
+          currentIterationId={iterationId}
+          requirements={[migrateTarget]}
+          onMigrated={() => queryClient.invalidateQueries({ queryKey: ['requirements-page', iterationId] })}
+        />
+      )}
     </div>
   )
 }

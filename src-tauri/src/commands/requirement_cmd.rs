@@ -58,3 +58,9 @@ pub async fn get_linked_requirement(state: State<'_, AppState>, link_type: Strin
     let db = state.db.lock().await;
     requirement_service::get_linked_requirement(&db.conn, &link_type, link_id)
 }
+
+#[tauri::command]
+pub async fn migrate_requirements(state: State<'_, AppState>, req: RequirementMigrateReq) -> AppResult<()> {
+    let db = state.db.lock().await;
+    requirement_service::migrate_requirements(&db.conn, &req)
+}
